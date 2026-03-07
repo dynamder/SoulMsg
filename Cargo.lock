@@ -2510,6 +2510,7 @@ name = "soul_msg"
 version = "0.1.0"
 dependencies = [
  "smsg_macro",
+ "zenoh",
  "zenoh-ext",
 ]
 

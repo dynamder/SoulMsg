@@ -11,63 +11,125 @@ Each message struct gets a generated `MessageMeta` implementation:
 ```rust
 pub trait MessageMeta {
     fn version_hash() -> [u8; 32];
+    fn name_hash() -> [u8; 32];
     fn message_name() -> &'static str;
 }
 ```
 
 **Contract**:
-- `version_hash()` returns exactly 32 bytes (blake3 hash)
-- Hash is computed at compile-time from message definition
+- `version_hash()` returns exactly 32 bytes (blake3 hash of message schema)
+- `name_hash()` returns exactly 32 bytes (blake3 hash of message name string)
+- Both hashes are computed at compile-time from message definition
 - `message_name()` returns the struct name as static string
 
-### Generated: SmsgEnvelope<T>
+### SmsgEnvelope<T> (from soul_msg crate)
 
-Wrapper struct generated for each message type:
+Public API for envelope operations:
 
 ```rust
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SmsgEnvelope<T> {
-    pub version_hash: [u8; 32],
+    version_hash: [u8; 32],
+    name_hash: [u8; 32],
     pub payload: T,
 }
 
-impl<T: MessageMeta> SmsgEnvelope<T> {
+impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn new(payload: T) -> Self {
         Self {
             version_hash: T::version_hash(),
+            name_hash: T::name_hash(),
             payload,
         }
     }
 
-    pub fn into_parts(self) -> ([u8; 32], T) {
-        (self.version_hash, self.payload)
-    }
+    pub fn version_hash(&self) -> &[u8; 32];
+    pub fn name_hash(&self) -> &[u8; 32];
+    pub fn into_parts(self) -> ([u8; 32], [u8; 32], T);
+    pub fn into_payload(self) -> T;
+    
+    pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
 }
 ```
 
 **Contract**:
-- Generic over any type T implementing MessageMeta
-- `new()` initializes version_hash by calling `T::version_hash()`
-- Returns hash and payload via `into_parts()`
+- Generic over any type T implementing MessageMeta + zenoh_ext::Deserialize
+- `new()` initializes version_hash and name_hash by calling respective MessageMeta methods
+- `try_deserialize()` validates headers before deserializing payload
+
+### EnvelopeError
+
+```rust
+pub enum EnvelopeError {
+    NotAnEnvelope(String),
+    TypeMismatch {
+        expected_name_hash: [u8; 32],
+        actual_name_hash: [u8; 32],
+    },
+    VersionMismatch {
+        expected_version_hash: [u8; 32],
+        actual_version_hash: [u8; 32],
+    },
+    DeserializeError(String),
+}
+```
+
+### Serialization Format
+
+When sending an SmsgEnvelope:
+```
+[name_hash: 32 bytes][version_hash: 32 bytes][payload: variable bytes]
+```
+
+### Deserialization Flow
+
+1. Try to deserialize first 32 bytes as name_hash
+   - If fails → `NotAnEnvelope`
+2. Compare extracted name_hash with T::name_hash()
+   - If mismatch → `TypeMismatch`
+3. Try to deserialize next 32 bytes as version_hash
+   - If fails → `NotAnEnvelope`
+4. Compare extracted version_hash with T::version_hash()
+   - If mismatch → `VersionMismatch`
+5. Deserialize remaining bytes as payload type T
+   - If fails → `DeserializeError`
 
 ### Usage Example
 
 ```rust
-use my_messages::MessageMeta;
+use soul_msg::{MessageMeta, SmsgEnvelope};
 
-// Get hash at compile-time
-let hash = MyMessage::version_hash();
+// Get hashes at compile-time
+let version = MyMessage::version_hash();
+let name = MyMessage::name_hash();
 
 // Create envelope
-let envelope = SmsgEnvelope::new(MyMessage { field: "value".to_string() });
-let (hash, msg) = envelope.into_parts();
+let msg = MyMessage { field: "value".to_string() };
+let envelope = SmsgEnvelope::new(msg);
+
+// Send (serializes name_hash + version_hash + payload)
+let zbytes = zenoh_ext::z_serialize(&envelope.payload);
+
+// Receive (validates headers before returning payload)
+let result = SmsgEnvelope::<MyMessage>::try_deserialize(zbytes);
+match result {
+    Ok(payload) => { /* success */ }
+    Err(EnvelopeError::NotAnEnvelope(msg)) => { /* not an envelope */ }
+    Err(EnvelopeError::TypeMismatch { .. }) => { /* wrong message type */ }
+    Err(EnvelopeError::VersionMismatch { .. }) => { /* schema version changed */ }
+    Err(EnvelopeError::DeserializeError(msg)) => { /* corrupt data */ }
+}
 ```
 
 ## Error Handling
 
-All errors are compile-time `compile_error!` from proc-macro:
+Runtime errors via EnvelopeError enum:
+- NotAnEnvelope: Failed to deserialize headers (sender didn't send envelope)
+- TypeMismatch: name_hash mismatch (sender sent different message type)
+- VersionMismatch: version_hash mismatch (sender used different schema)
+- DeserializeError: Payload deserialization failed
+
+Compile-time errors from proc-macro:
 - Invalid smsg file format
 - Parse errors in message definitions
 - Hash computation failures
-
-No runtime errors possible - hash is computed at compile-time.

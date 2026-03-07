@@ -1,22 +1,27 @@
 # Implementation Plan: Message Hash Verification
 
-**Branch**: `003-message-hash` | **Date**: 2026-03-07 | **Spec**: `spec.md`
+**Branch**: `003-message-hash` | **Date**: 2026-03-08 | **Spec**: `spec.md`
 **Input**: Feature specification from `/specs/003-message-hash/spec.md`
 
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
 ## Summary
 
-Generate blake3 hash for each message definition in an smsg package. Hash is hardcoded in MessageMeta trait via procedural macro. SmsgEnvelope<T> wrapper includes version_hash field initialized at construction time via MessageMeta::version_hash().
+Generate blake3 hash for each message definition in an smsg package. Hash is hardcoded in MessageMeta trait via procedural macro. SmsgEnvelope<T> wrapper includes version_hash and name_hash fields initialized at construction time via MessageMeta trait methods.
+
+When sending: SmsgEnvelope serializes name_hash + version_hash + payload as headers
+When receiving: try_deserialize extracts and verifies hashes before payload
 
 ## Technical Context
 
 **Language/Version**: Rust 2024 (edition)  
-**Primary Dependencies**: blake3 (for hash), syn, quote, winnow, toml, proc-macro2  
+**Primary Dependencies**: blake3 (for hash), syn, quote, winnow, toml, proc-macro2, zenoh-ext, zenoh  
 **Storage**: N/A  
 **Testing**: cargo test, cargo clippy  
 **Target Platform**: Cross-platform (Windows/Linux)  
-**Project Type**: Two-crate library (Rust):- soul_msg: outer wrapper crate- smsg_macro: inner proc-macro crate  
+**Project Type**: Two-crate library (Rust):
+- soul_msg: outer wrapper crate
+- smsg_macro: inner proc-macro crate  
 **Performance Goals**: Under 1 second for packages with up to 100 messages  
 **Constraints**: Error messages within 500ms  
 **Scale/Scope**: 100 messages per package
@@ -57,7 +62,7 @@ The project uses a two-crate structure:
 soul_msg/                    # Outer crate (library wrapper)
 ├── Cargo.toml
 └── src/
-    └── lib.rs              # Re-exports smsg macro, provides SmsgEnvelope<T>
+    └── lib.rs              # Re-exports smsg macro, provides MessageMeta trait and SmsgEnvelope<T>
 
 smsg_macro/                  # Inner crate (proc-macro)
 ├── Cargo.toml
@@ -66,7 +71,7 @@ smsg_macro/                  # Inner crate (proc-macro)
 │   ├── codegen/
 │   │   ├── mod.rs
 │   │   ├── struct_gen.rs   # Struct generation
-│   │   └── derive_gen.rs   # Derive macro generation (MessageMeta, SmsgEnvelope)
+│   │   └── derive_gen.rs   # Generates impl ::soul_msg::MessageMeta for message structs
 │   ├── parser/
 │   │   ├── mod.rs
 │   │   ├── package_parser.rs
@@ -78,26 +83,99 @@ smsg_macro/                  # Inner crate (proc-macro)
     ├── integration_test.rs
     └── fixtures/
         ├── messages.smsg
+        ├── messages_old.smsg
         └── packages/
 ```
 
 ### Crate Relationships
 
-- **soul_msg** (outer): Re-exports `smsg` proc macro, provides `MessageMeta` trait and `SmsgEnvelope<T>` wrapper type
-- **smsg_macro** (inner): Procedural macro crate that generates message structs and implements `MessageMeta` trait for them (references `::soul_msg::MessageMeta`)
+- **soul_msg** (outer): Re-exports `smsg` proc macro, provides `MessageMeta` trait, `SmsgEnvelope<T>`, and `EnvelopeError`
+- **smsg_macro** (inner): Procedural macro crate that generates message structs and implements `MessageMeta` trait for them
 
-### Feature Implementation (003-message-hash additions)
+## Architecture Design
 
-Hash computation and MessageMeta implementation are in the smsg_macro crate:
+### MessageMeta Trait
 
-```text
-smsg_macro/src/
-├── hash.rs                 # blake3 hash computation
-├── codegen/
-│   └── derive_gen.rs       # Generates impl ::soul_msg::MessageMeta for message structs
+Defined in soul_msg, implemented by generated message structs via proc-macro:
+
+```rust
+pub trait MessageMeta {
+    fn version_hash() -> [u8; 32];  // Hash of message schema (fields, types, order)
+    fn name_hash() -> [u8; 32];      // Hash of message name (blake3 of message name string)
+    fn message_name() -> &'static str;
+}
 ```
 
-**Key Design**: `MessageMeta` trait and `SmsgEnvelope<T>` are defined in the outer crate (soul_msg). The proc-macro generates code that implements `MessageMeta` for the generated message structs, referencing the trait via `::soul_msg::MessageMeta`.
+### SmsgEnvelope<T>
+
+Wrapper struct that bundles version metadata with payload:
+
+```rust
+pub struct SmsgEnvelope<T> {
+    version_hash: [u8; 32],
+    name_hash: [u8; 32],
+    pub payload: T,
+}
+
+impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
+    pub fn new(payload: T) -> Self;
+    pub fn into_parts(self) -> ([u8; 32], [u8; 32], T);
+    pub fn into_payload(self) -> T;
+    pub fn version_hash(&self) -> &[u8; 32];
+    pub fn name_hash(&self) -> &[u8; 32];
+    pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
+}
+```
+
+### Serialization Format
+
+When sending an SmsgEnvelope, the data is serialized as:
+1. **name_hash** (32 bytes) - Hash of message type name
+2. **version_hash** (32 bytes) - Hash of message schema
+3. **payload** (variable) - The actual message data
+
+### Deserialization Flow (try_deserialize)
+
+When receiving data, the deserialization process is:
+
+1. **Attempt to deserialize name_hash**: Try to extract first 32 bytes as name_hash
+   - If deserialization fails → return `NotAnEnvelope` error (sender didn't send an SmsgEnvelope)
+   
+2. **Compare name_hash**: Compare extracted name_hash with T::name_hash()
+   - If mismatch → return `TypeMismatch` error (sender sent different message type)
+   
+3. **Attempt to deserialize version_hash**: Try to extract next 32 bytes as version_hash
+   - If deserialization fails → return `NotAnEnvelope` error
+   
+4. **Compare version_hash**: Compare extracted version_hash with T::version_hash()
+   - If mismatch → return `VersionMismatch` error (sender used different schema version)
+   
+5. **Deserialize payload**: Deserialize remaining bytes as payload type T
+   - If fails → return `DeserializeError`
+
+### EnvelopeError Variants
+
+```rust
+pub enum EnvelopeError {
+    NotAnEnvelope(String),           // Data is not a valid SmsgEnvelope
+    TypeMismatch {                   // name_hash doesn't match expected type
+        expected_name_hash: [u8; 32],
+        actual_name_hash: [u8; 32],
+    },
+    VersionMismatch {                 // version_hash doesn't match expected version
+        expected_version_hash: [u8; 32],
+        actual_version_hash: [u8; 32],
+    },
+    DeserializeError(String),         // Payload deserialization failed
+}
+```
+
+### Key Design Decisions
+
+1. **Hash Computation**: Uses blake3 for both name_hash (fast, simple) and version_hash (includes schema details)
+2. **Headers First**: name_hash and version_hash are always at the beginning of serialized data for efficient validation
+3. **Fail Fast**: Validate name_hash before version_hash, version_hash before payload
+4. **Self-Describing**: Message type and version are embedded in the envelope for runtime verification
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
 
