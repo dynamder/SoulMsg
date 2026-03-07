@@ -1,0 +1,3 @@
+[submodule "smsg_macro"]
+	path = smsg_macro
+	url = ./smsg_macro
