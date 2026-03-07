@@ -7,7 +7,7 @@ pub trait MessageMeta {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmsgEnvelope<T> {
-    pub version_hash: [u8; 32],
+    version_hash: [u8; 32],
     pub payload: T,
 }
 
@@ -26,6 +26,9 @@ impl<T: MessageMeta> SmsgEnvelope<T> {
     pub fn into_payload(self) -> T {
         self.payload
     }
+    pub fn version_hash(&self) -> &[u8; 32] {
+        &self.version_hash
+    }
 }
 
 #[cfg(test)]
@@ -40,16 +43,20 @@ mod tests {
 
     impl TestMessage {
         fn new() -> Self {
-            Self { id: 0, name: String::new() }
+            Self {
+                id: 0,
+                name: String::new(),
+            }
         }
     }
 
     impl MessageMeta for TestMessage {
         fn version_hash() -> [u8; 32] {
-            [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-             0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-             0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-             0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20]
+            [
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+                0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                0x1d, 0x1e, 0x1f, 0x20,
+            ]
         }
 
         fn message_name() -> &'static str {
@@ -62,17 +69,20 @@ mod tests {
         let msg = TestMessage::new();
         let envelope = SmsgEnvelope::new(msg);
 
-        assert_eq!(envelope.version_hash, TestMessage::version_hash());
+        assert_eq!(*envelope.version_hash(), TestMessage::version_hash());
         assert_eq!(envelope.payload.id, 0);
         assert_eq!(envelope.payload.name, "");
     }
 
     #[test]
     fn test_smsg_envelope_new_with_data() {
-        let msg = TestMessage { id: 42, name: "Test".to_string() };
+        let msg = TestMessage {
+            id: 42,
+            name: "Test".to_string(),
+        };
         let envelope = SmsgEnvelope::new(msg);
 
-        assert_eq!(envelope.version_hash, TestMessage::version_hash());
+        assert_eq!(*envelope.version_hash(), TestMessage::version_hash());
         assert_eq!(envelope.payload.id, 42);
         assert_eq!(envelope.payload.name, "Test");
     }
@@ -89,7 +99,10 @@ mod tests {
 
     #[test]
     fn test_smsg_envelope_into_payload() {
-        let msg = TestMessage { id: 100, name: "Payload".to_string() };
+        let msg = TestMessage {
+            id: 100,
+            name: "Payload".to_string(),
+        };
         let envelope = SmsgEnvelope::new(msg);
         let payload = envelope.into_payload();
 
@@ -103,7 +116,7 @@ mod tests {
         let envelope = SmsgEnvelope::new(msg);
         let cloned = envelope.clone();
 
-        assert_eq!(cloned.version_hash, envelope.version_hash);
+        assert_eq!(*cloned.version_hash(), *envelope.version_hash());
         assert_eq!(cloned.payload.id, envelope.payload.id);
     }
 
@@ -129,8 +142,14 @@ mod tests {
 
     #[test]
     fn test_smsg_envelope_partial_eq() {
-        let msg1 = TestMessage { id: 1, name: "A".to_string() };
-        let msg2 = TestMessage { id: 1, name: "A".to_string() };
+        let msg1 = TestMessage {
+            id: 1,
+            name: "A".to_string(),
+        };
+        let msg2 = TestMessage {
+            id: 1,
+            name: "A".to_string(),
+        };
         let envelope1 = SmsgEnvelope::new(msg1);
         let envelope2 = SmsgEnvelope::new(msg2);
 
@@ -139,8 +158,14 @@ mod tests {
 
     #[test]
     fn test_smsg_envelope_partial_eq_different_payload() {
-        let msg1 = TestMessage { id: 1, name: "A".to_string() };
-        let msg2 = TestMessage { id: 2, name: "B".to_string() };
+        let msg1 = TestMessage {
+            id: 1,
+            name: "A".to_string(),
+        };
+        let msg2 = TestMessage {
+            id: 2,
+            name: "B".to_string(),
+        };
         let envelope1 = SmsgEnvelope::new(msg1);
         let envelope2 = SmsgEnvelope::new(msg2);
 
