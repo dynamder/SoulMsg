@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 smsg_macro = { path = "smsg_macro" }
+zenoh-ext = "1.7.2"
