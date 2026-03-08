@@ -26,11 +26,25 @@ impl std::fmt::Display for EnvelopeError {
             EnvelopeError::NotAnEnvelope(msg) => {
                 write!(f, "Not an envelope: {}", msg)
             }
-            EnvelopeError::TypeMismatch { expected_name_hash, actual_name_hash } => {
-                write!(f, "Type mismatch: expected name_hash {:02x?}, got {:02x?}", expected_name_hash, actual_name_hash)
+            EnvelopeError::TypeMismatch {
+                expected_name_hash,
+                actual_name_hash,
+            } => {
+                write!(
+                    f,
+                    "Type mismatch: expected name_hash {:02x?}, got {:02x?}",
+                    expected_name_hash, actual_name_hash
+                )
             }
-            EnvelopeError::VersionMismatch { expected_version_hash, actual_version_hash } => {
-                write!(f, "Version mismatch: expected version_hash {:02x?}, got {:02x?}", expected_version_hash, actual_version_hash)
+            EnvelopeError::VersionMismatch {
+                expected_version_hash,
+                actual_version_hash,
+            } => {
+                write!(
+                    f,
+                    "Version mismatch: expected version_hash {:02x?}, got {:02x?}",
+                    expected_version_hash, actual_version_hash
+                )
             }
             EnvelopeError::DeserializeError(msg) => {
                 write!(f, "Deserialize error: {}", msg)
@@ -87,15 +101,16 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
 
         if bytes.len() < 64 {
             return Err(EnvelopeError::NotAnEnvelope(
-                "Data too short: need at least 64 bytes for name_hash (32) + version_hash (32)".to_string()
+                "Data too short: need at least 64 bytes for name_hash (32) + version_hash (32)"
+                    .to_string(),
             ));
         }
 
         let mut offset = 0;
 
-        let actual_name_hash: [u8; 32] = bytes[offset..offset + 32].try_into().map_err(|_| {
-            EnvelopeError::NotAnEnvelope("Failed to read name_hash".to_string())
-        })?;
+        let actual_name_hash: [u8; 32] = bytes[offset..offset + 32]
+            .try_into()
+            .map_err(|_| EnvelopeError::NotAnEnvelope("Failed to read name_hash".to_string()))?;
         offset += 32;
 
         let expected_name_hash = T::name_hash();
@@ -106,9 +121,9 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
             });
         }
 
-        let actual_version_hash: [u8; 32] = bytes[offset..offset + 32].try_into().map_err(|_| {
-            EnvelopeError::NotAnEnvelope("Failed to read version_hash".to_string())
-        })?;
+        let actual_version_hash: [u8; 32] = bytes[offset..offset + 32]
+            .try_into()
+            .map_err(|_| EnvelopeError::NotAnEnvelope("Failed to read version_hash".to_string()))?;
         offset += 32;
 
         let expected_version_hash = T::version_hash();
@@ -121,9 +136,30 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
 
         let payload_bytes = &bytes[offset..];
         let payload_zbytes = zenoh::bytes::ZBytes::from(payload_bytes);
-        
-        zenoh_ext::z_deserialize(&payload_zbytes).map_err(|e| {
-            EnvelopeError::DeserializeError(e.to_string())
+
+        zenoh_ext::z_deserialize(&payload_zbytes)
+            .map_err(|e| EnvelopeError::DeserializeError(e.to_string()))
+    }
+}
+
+impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {
+    fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer) {
+        self.name_hash.serialize(serializer);
+        self.version_hash.serialize(serializer);
+        self.payload.serialize(serializer);
+    }
+}
+
+impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
+    fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
+        let name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        let version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        let payload: T = zenoh_ext::Deserialize::deserialize(deserializer)?;
+
+        Ok(SmsgEnvelope {
+            name_hash,
+            version_hash,
+            payload,
         })
     }
 }
