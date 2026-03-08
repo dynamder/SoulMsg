@@ -47,15 +47,36 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn name_hash(&self) -> &[u8; 32];
     pub fn into_parts(self) -> ([u8; 32], [u8; 32], T);
     pub fn into_payload(self) -> T;
+    pub fn verify_version(&self, expected: &[u8; 32]) -> bool;
+    pub fn verify_name(&self, expected: &[u8; 32]) -> bool;
     
     pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
+}
+
+impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {
+    fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer) {
+        self.name_hash.serialize(serializer);
+        self.version_hash.serialize(serializer);
+        self.payload.serialize(serializer);
+    }
+}
+
+impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
+    fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
+        let name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        let version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        let payload: T = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        Ok(SmsgEnvelope { name_hash, version_hash, payload })
+    }
 }
 ```
 
 **Contract**:
-- Generic over any type T implementing MessageMeta + zenoh_ext::Deserialize
+- Generic over any type T implementing MessageMeta + zenoh_ext::Serialize/Deserialize
 - `new()` initializes version_hash and name_hash by calling respective MessageMeta methods
-- `try_deserialize()` validates headers before deserializing payload
+- `try_deserialize()` validates headers before deserializing payload (progressive: name_hash first, then version_hash)
+- Implements `zenoh_ext::Serialize` - serializes as `name_hash (32) + version_hash (32) + payload`
+- Implements `zenoh_ext::Deserialize` - deserializes in same format, useful for roundtrip
 
 ### EnvelopeError
 
@@ -98,6 +119,7 @@ When sending an SmsgEnvelope:
 
 ```rust
 use soul_msg::{MessageMeta, SmsgEnvelope};
+use zenoh_ext::{z_deserialize, z_serialize};
 
 // Get hashes at compile-time
 let version = MyMessage::version_hash();
@@ -107,11 +129,17 @@ let name = MyMessage::name_hash();
 let msg = MyMessage { field: "value".to_string() };
 let envelope = SmsgEnvelope::new(msg);
 
-// Send (serializes name_hash + version_hash + payload)
-let zbytes = zenoh_ext::z_serialize(&envelope.payload);
+// Option 1: Manual serialization (for try_deserialize with validation)
+let (vhash, nhash, payload) = envelope.into_parts();
+let serialized_payload = z_serialize(&payload);
+let payload_bytes = serialized_payload.to_bytes();
+let mut tx_data = Vec::new();
+tx_data.extend_from_slice(&nhash);
+tx_data.extend_from_slice(&vhash);
+tx_data.extend_from_slice(&payload_bytes);
 
-// Receive (validates headers before returning payload)
-let result = SmsgEnvelope::<MyMessage>::try_deserialize(zbytes);
+// Receive with validation
+let result = SmsgEnvelope::<MyMessage>::try_deserialize(tx_data);
 match result {
     Ok(payload) => { /* success */ }
     Err(EnvelopeError::NotAnEnvelope(msg)) => { /* not an envelope */ }
@@ -119,6 +147,11 @@ match result {
     Err(EnvelopeError::VersionMismatch { .. }) => { /* schema version changed */ }
     Err(EnvelopeError::DeserializeError(msg)) => { /* corrupt data */ }
 }
+
+// Option 2: Serialize/Deserialize roundtrip (preserves hashes)
+let serialized = z_serialize(&envelope);
+let deserialized: SmsgEnvelope<MyMessage> = z_deserialize(&serialized).unwrap();
+// deserialized has same name_hash and version_hash
 ```
 
 ## Error Handling

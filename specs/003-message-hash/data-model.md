@@ -65,6 +65,14 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn new(payload: T) -> Self;
     pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
 }
+
+impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {
+    fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer);
+}
+
+impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
+    fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError>;
+}
 ```
 
 | Field | Type | Description |
@@ -75,6 +83,13 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
 
 **Construction**: 
 - `SmsgEnvelope::new(payload: T) -> Self` calls `MessageMeta::version_hash()` and `MessageMeta::name_hash()` to initialize fields
+
+**Serialization**:
+- Implements `zenoh_ext::Serialize` - serializes as `name_hash (32) + version_hash (32) + payload`
+
+**Deserialization**:
+- Implements `zenoh_ext::Deserialize` - deserializes in same format
+- `try_deserialize()` provides progressive validation (name_hash first, then version_hash)
 
 **Relationships**:
 - Generic over any message type T that implements MessageMeta

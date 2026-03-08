@@ -61,8 +61,10 @@ The project uses a two-crate structure:
 ```text
 soul_msg/                    # Outer crate (library wrapper)
 ├── Cargo.toml
-└── src/
-    └── lib.rs              # Re-exports smsg macro, provides MessageMeta trait and SmsgEnvelope<T>
+├── src/
+│   └── lib.rs              # Re-exports smsg macro, provides MessageMeta trait and SmsgEnvelope<T>
+└── tests/
+    └── envelope_test.rs    # Tests for SmsgEnvelope
 
 smsg_macro/                  # Inner crate (proc-macro)
 ├── Cargo.toml
@@ -80,7 +82,7 @@ smsg_macro/                  # Inner crate (proc-macro)
 │   ├── hash.rs             # Hash computation
 │   └── error.rs            # Error types
 └── tests/
-    ├── integration_test.rs
+    ├── integration_test.rs  # Tests for code generation
     └── fixtures/
         ├── messages.smsg
         ├── messages_old.smsg
@@ -123,7 +125,28 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn into_payload(self) -> T;
     pub fn version_hash(&self) -> &[u8; 32];
     pub fn name_hash(&self) -> &[u8; 32];
+    pub fn verify_version(&self, expected: &[u8; 32]) -> bool;
+    pub fn verify_name(&self, expected: &[u8; 32]) -> bool;
     pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
+}
+
+// zenoh_ext::Serialize implementation - serializes as name_hash + version_hash + payload
+impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {
+    fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer) {
+        self.name_hash.serialize(serializer);
+        self.version_hash.serialize(serializer);
+        self.payload.serialize(serializer);
+    }
+}
+
+// zenoh_ext::Deserialize implementation - deserializes in same format
+impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
+    fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
+        let name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        let version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        let payload: T = zenoh_ext::Deserialize::deserialize(deserializer)?;
+        Ok(SmsgEnvelope { name_hash, version_hash, payload })
+    }
 }
 ```
 
