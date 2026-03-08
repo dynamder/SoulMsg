@@ -1,4 +1,4 @@
-use soul_msg::{MessageMeta, SmsgEnvelope};
+use soul_msg::{MessageMeta, SmsgEnvelope, EnvelopeError};
 use zenoh_ext::{z_deserialize, z_serialize};
 
 mod test_messages {
@@ -8,7 +8,14 @@ mod test_messages {
     pub mod chat_msgs {}
 }
 
-mod envelope_tests {
+mod test_messages_old {
+    use soul_msg::smsg;
+    
+    #[smsg(category = file, path = "smsg_macro/tests/fixtures/messages_old.smsg")]
+    pub mod old_chat_msgs {}
+}
+
+mod envelope_basic_tests {
     use super::*;
 
     #[test]
@@ -312,8 +319,6 @@ mod envelope_serialize_tests {
 }
 
 mod try_deserialize_tests {
-    use soul_msg::EnvelopeError;
-
     use super::*;
 
     #[test]
@@ -378,5 +383,515 @@ mod try_deserialize_tests {
     fn test_try_deserialize_data_too_short() {
         let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> = SmsgEnvelope::try_deserialize(vec![0u8; 32]);
         assert!(matches!(result, Err(EnvelopeError::NotAnEnvelope(_))));
+    }
+}
+
+mod network_transmission_simulation_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_simulate_network_transmission_with_payload_integrity() {
+        let original_msg = test_messages::chat_msgs::ChatMessage {
+            sender: "NetworkTest".to_string(),
+            content: "Testing payload integrity over simulated network".to_string(),
+            timestamp: 1699999999,
+        };
+
+        let envelope = SmsgEnvelope::new(original_msg.clone());
+
+        let serialized = z_serialize(&envelope);
+        let bytes = serialized.to_bytes();
+        
+        let cursor = Cursor::new(bytes);
+        let received_bytes: Vec<u8> = cursor.get_ref().to_vec();
+        
+        let received_zbytes = zenoh::bytes::ZBytes::from(received_bytes);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&received_zbytes).unwrap();
+
+        assert_eq!(deserialized.payload.sender, original_msg.sender);
+        assert_eq!(deserialized.payload.content, original_msg.content);
+        assert_eq!(deserialized.payload.timestamp, original_msg.timestamp);
+    }
+
+    #[test]
+    fn test_simulate_packet_loss_recovery() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "PacketTest".to_string(),
+            content: "Test message".to_string(),
+            timestamp: 123,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        
+        let (vhash, nhash, payload) = envelope.into_parts();
+        let serialized_payload = z_serialize(&payload);
+        let payload_bytes = serialized_payload.to_bytes();
+        
+        let mut tx_data = Vec::new();
+        tx_data.extend_from_slice(&nhash);
+        tx_data.extend_from_slice(&vhash);
+        tx_data.extend_from_slice(&payload_bytes);
+
+        let result = SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data.clone());
+        assert!(result.is_ok());
+
+        let corrupted_data = {
+            let mut corrupted = tx_data.clone();
+            corrupted[0] = corrupted[0].wrapping_add(1);
+            corrupted
+        };
+        
+        let corrupted_result = SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(corrupted_data);
+        match corrupted_result {
+            Ok(_) => panic!("Corrupted data should not deserialize successfully"),
+            Err(EnvelopeError::TypeMismatch { .. }) => {}
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn test_sequential_message_handling() {
+        let messages = vec![
+            test_messages::chat_msgs::ChatMessage {
+                sender: "User1".to_string(),
+                content: "First message".to_string(),
+                timestamp: 1000,
+            },
+            test_messages::chat_msgs::ChatMessage {
+                sender: "User2".to_string(),
+                content: "Second message".to_string(),
+                timestamp: 2000,
+            },
+            test_messages::chat_msgs::ChatMessage {
+                sender: "User3".to_string(),
+                content: "Third message".to_string(),
+                timestamp: 3000,
+            },
+        ];
+
+        for (i, original) in messages.iter().enumerate() {
+            let envelope = SmsgEnvelope::new(original.clone());
+            let serialized = z_serialize(&envelope);
+            let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+            
+            assert_eq!(deserialized.payload.sender, original.sender, "Message {} sender mismatch", i);
+            assert_eq!(deserialized.payload.content, original.content, "Message {} content mismatch", i);
+            assert_eq!(deserialized.payload.timestamp, original.timestamp, "Message {} timestamp mismatch", i);
+        }
+    }
+
+    #[test]
+    fn test_large_payload_handling() {
+        let large_content = "x".repeat(1024 * 100);
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "LargePayload".to_string(),
+            content: large_content,
+            timestamp: 999999,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        
+        assert!(serialized.to_bytes().len() > 1024 * 50);
+        
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+        
+        assert_eq!(deserialized.payload.sender, msg.sender);
+        assert_eq!(deserialized.payload.content.len(), msg.content.len());
+        assert_eq!(deserialized.payload.timestamp, msg.timestamp);
+    }
+
+    #[test]
+    fn test_empty_payload_handling() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: String::new(),
+            content: String::new(),
+            timestamp: 0,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.sender, msg.sender);
+        assert_eq!(deserialized.payload.content, msg.content);
+    }
+
+    #[test]
+    fn test_unicode_payload_handling() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Unicode用户".to_string(),
+            content: "Hello 🌍 你好 🔥".to_string(),
+            timestamp: 123456,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.sender, msg.sender);
+        assert_eq!(deserialized.payload.content, msg.content);
+    }
+
+    #[test]
+    fn test_special_characters_in_payload() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test\"with\nnewlines\tand\ttabs".to_string(),
+            content: "Content with\r\nCRLF and 'quotes' and <xml>".to_string(),
+            timestamp: 111,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.sender, msg.sender);
+        assert_eq!(deserialized.payload.content, msg.content);
+    }
+}
+
+mod version_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn test_version_hash_differs_when_schema_changes() {
+        let old_msg = test_messages_old::old_chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Hello".to_string(),
+            timestamp: 123,
+            version: 1,
+        };
+        let old_envelope = SmsgEnvelope::new(old_msg);
+
+        let new_msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Hello".to_string(),
+            timestamp: 123,
+        };
+        let new_envelope = SmsgEnvelope::new(new_msg);
+
+        assert_ne!(*old_envelope.version_hash(), *new_envelope.version_hash(), "Version hashes should differ for different schemas");
+    }
+
+    #[test]
+    fn test_name_hash_same_for_compatible_messages() {
+        let old_msg = test_messages_old::old_chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Hello".to_string(),
+            timestamp: 123,
+            version: 1,
+        };
+        let old_envelope = SmsgEnvelope::new(old_msg);
+
+        let new_msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Hello".to_string(),
+            timestamp: 123,
+        };
+        let new_envelope = SmsgEnvelope::new(new_msg);
+
+        assert_eq!(*old_envelope.name_hash(), *new_envelope.name_hash(), "Name hashes should be same for same message type");
+    }
+
+    #[test]
+    fn test_try_deserialize_version_mismatch() {
+        let old_msg = test_messages_old::old_chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Content".to_string(),
+            timestamp: 123,
+            version: 1,
+        };
+        let old_envelope = SmsgEnvelope::new(old_msg);
+
+        let (vhash, nhash, payload) = old_envelope.into_parts();
+        let serialized_payload = z_serialize(&payload);
+        let payload_bytes = serialized_payload.to_bytes();
+        
+        let mut tx_data = Vec::new();
+        tx_data.extend_from_slice(&nhash);
+        tx_data.extend_from_slice(&vhash);
+        tx_data.extend_from_slice(&payload_bytes);
+
+        let result = SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data);
+        
+        match result {
+            Err(EnvelopeError::VersionMismatch { .. }) => {}
+            _ => panic!("Expected VersionMismatch error"),
+        }
+    }
+
+    #[test]
+    fn test_try_deserialize_with_old_version_stores_hash() {
+        let original_msg = test_messages_old::old_chat_msgs::ChatMessage {
+            sender: "Old".to_string(),
+            content: "Old message".to_string(),
+            timestamp: 1000,
+            version: 1,
+        };
+
+        let envelope = SmsgEnvelope::new(original_msg);
+        let stored_version_hash = *envelope.version_hash();
+        let stored_name_hash = *envelope.name_hash();
+
+        let new_msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Alice".to_string(),
+            content: "Old message".to_string(),
+            timestamp: 1000,
+        };
+        let new_envelope = SmsgEnvelope::new(new_msg);
+
+        assert_ne!(stored_version_hash, *new_envelope.version_hash());
+        assert_eq!(stored_name_hash, *new_envelope.name_hash());
+
+        assert!(!new_envelope.verify_version(&stored_version_hash));
+        assert!(new_envelope.verify_name(&stored_name_hash));
+    }
+}
+
+mod nested_message_tests {
+    use super::*;
+
+    #[test]
+    fn test_robot_state_with_nested_position() {
+        let msg = test_messages::chat_msgs::RobotState {
+            name: "R2-D2".to_string(),
+            position: test_messages::chat_msgs::Position {
+                x: 100.5,
+                y: 200.5,
+                z: 300.5,
+            },
+            status: 42,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::RobotState> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.name, msg.name);
+        assert_eq!(deserialized.payload.position.x, msg.position.x);
+        assert_eq!(deserialized.payload.position.y, msg.position.y);
+        assert_eq!(deserialized.payload.position.z, msg.position.z);
+        assert_eq!(deserialized.payload.status, msg.status);
+    }
+
+    #[test]
+    fn test_nested_message_hash_uniqueness() {
+        let robot_hash = test_messages::chat_msgs::RobotState::version_hash();
+        let position_hash = test_messages::chat_msgs::Position::version_hash();
+        
+        assert_ne!(robot_hash, position_hash);
+    }
+}
+
+mod edge_case_tests {
+    use super::*;
+
+    #[test]
+    fn test_verify_with_wrong_hash() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Content".to_string(),
+            timestamp: 123,
+        };
+        let envelope = SmsgEnvelope::new(msg);
+
+        let wrong_hash = [0u8; 32];
+        assert!(!envelope.verify_version(&wrong_hash));
+        assert!(!envelope.verify_name(&wrong_hash));
+    }
+
+    #[test]
+    fn test_multiple_envelopes_same_hash_different_payloads() {
+        let msg1 = test_messages::chat_msgs::ChatMessage {
+            sender: "A".to_string(),
+            content: "Message A".to_string(),
+            timestamp: 100,
+        };
+        let msg2 = test_messages::chat_msgs::ChatMessage {
+            sender: "B".to_string(),
+            content: "Message B".to_string(),
+            timestamp: 200,
+        };
+
+        let envelope1 = SmsgEnvelope::new(msg1);
+        let envelope2 = SmsgEnvelope::new(msg2);
+
+        assert_eq!(*envelope1.version_hash(), *envelope2.version_hash());
+        assert_eq!(*envelope1.name_hash(), *envelope2.name_hash());
+        
+        assert_ne!(envelope1.payload.sender, envelope2.payload.sender);
+    }
+
+    #[test]
+    fn test_all_zero_payload() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: String::new(),
+            content: String::new(),
+            timestamp: 0,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        
+        let (vhash, nhash, payload) = envelope.into_parts();
+        let serialized_payload = z_serialize(&payload);
+        let payload_bytes = serialized_payload.to_bytes();
+        
+        let mut tx_data = Vec::new();
+        tx_data.extend_from_slice(&nhash);
+        tx_data.extend_from_slice(&vhash);
+        tx_data.extend_from_slice(&payload_bytes);
+
+        let received = SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data).unwrap();
+        
+        assert_eq!(received.sender, "");
+        assert_eq!(received.content, "");
+        assert_eq!(received.timestamp, 0);
+    }
+
+    #[test]
+    fn test_max_values_payload() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "x".repeat(10000),
+            content: "y".repeat(10000),
+            timestamp: i64::MAX,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.sender.len(), msg.sender.len());
+        assert_eq!(deserialized.payload.content.len(), msg.content.len());
+        assert_eq!(deserialized.payload.timestamp, i64::MAX);
+    }
+
+    #[test]
+    fn test_negative_timestamp() {
+        let msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Negative timestamp test".to_string(),
+            timestamp: -1000000,
+        };
+
+        let envelope = SmsgEnvelope::new(msg.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::ChatMessage> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.timestamp, -1000000);
+    }
+
+    #[test]
+    fn test_mixed_positive_negative_floats() {
+        let pos = test_messages::chat_msgs::Position {
+            x: -123.456,
+            y: 0.0,
+            z: 789.012,
+        };
+
+        let envelope = SmsgEnvelope::new(pos.clone());
+        let serialized = z_serialize(&envelope);
+        let deserialized: SmsgEnvelope<test_messages::chat_msgs::Position> = z_deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.payload.x, -123.456);
+        assert_eq!(deserialized.payload.y, 0.0);
+        assert_eq!(deserialized.payload.z, 789.012);
+    }
+}
+
+mod error_message_tests {
+    use super::*;
+
+    #[test]
+    fn test_not_an_envelope_error_message() {
+        let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> = 
+            SmsgEnvelope::try_deserialize(vec![0u8; 10]);
+        
+        match result {
+            Err(EnvelopeError::NotAnEnvelope(msg)) => {
+                assert!(!msg.is_empty());
+            }
+            _ => panic!("Expected NotAnEnvelope error"),
+        }
+    }
+
+    #[test]
+    fn test_type_mismatch_error_contains_hashes() {
+        let chat_msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Content".to_string(),
+            timestamp: 123,
+        };
+        let chat_envelope = SmsgEnvelope::new(chat_msg);
+
+        let pos_msg = test_messages::chat_msgs::Position {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let pos_envelope = SmsgEnvelope::new(pos_msg);
+
+        let chat_name_hash = *chat_envelope.name_hash();
+        let pos_name_hash = *pos_envelope.name_hash();
+        
+        let (vhash, _nhash, payload) = chat_envelope.into_parts();
+        let serialized_payload = z_serialize(&payload);
+        let payload_bytes = serialized_payload.to_bytes();
+        
+        let mut tx_data = Vec::new();
+        tx_data.extend_from_slice(&pos_name_hash);
+        tx_data.extend_from_slice(&vhash);
+        tx_data.extend_from_slice(&payload_bytes);
+
+        let result = SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data);
+        
+        match result {
+            Err(EnvelopeError::TypeMismatch { expected_name_hash, actual_name_hash }) => {
+                assert_eq!(expected_name_hash, chat_name_hash);
+                assert_eq!(actual_name_hash, pos_name_hash);
+            }
+            _ => panic!("Expected TypeMismatch error"),
+        }
+    }
+
+    #[test]
+    fn test_version_mismatch_error_contains_hashes() {
+        let old_msg = test_messages_old::old_chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Content".to_string(),
+            timestamp: 123,
+            version: 1,
+        };
+        let old_envelope = SmsgEnvelope::new(old_msg);
+
+        let new_msg = test_messages::chat_msgs::ChatMessage {
+            sender: "Test".to_string(),
+            content: "Content".to_string(),
+            timestamp: 123,
+        };
+        let new_envelope = SmsgEnvelope::new(new_msg);
+
+        let old_version_hash = *old_envelope.version_hash();
+        let old_name_hash = *old_envelope.name_hash();
+        let new_version_hash = *new_envelope.version_hash();
+        
+        let (vhash, nhash, payload) = old_envelope.into_parts();
+        let serialized_payload = z_serialize(&payload);
+        let payload_bytes = serialized_payload.to_bytes();
+        
+        let mut tx_data = Vec::new();
+        tx_data.extend_from_slice(&nhash);
+        tx_data.extend_from_slice(&vhash);
+        tx_data.extend_from_slice(&payload_bytes);
+        
+        let result = SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data);
+        
+        match result {
+            Err(EnvelopeError::VersionMismatch { expected_version_hash, actual_version_hash }) => {
+                assert_eq!(expected_version_hash, new_version_hash);
+                assert_eq!(actual_version_hash, old_version_hash);
+            }
+            _ => panic!("Expected VersionMismatch error"),
+        }
     }
 }
