@@ -151,7 +151,9 @@ impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelop
 }
 
 impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
-    fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
+    fn deserialize(
+        deserializer: &mut zenoh_ext::ZDeserializer,
+    ) -> Result<Self, zenoh_ext::ZDeserializeError> {
         let name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
         let version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
         let payload: T = zenoh_ext::Deserialize::deserialize(deserializer)?;
