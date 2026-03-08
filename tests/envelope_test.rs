@@ -872,7 +872,7 @@ mod error_message_tests {
         let new_envelope = SmsgEnvelope::new(new_msg);
 
         let old_version_hash = *old_envelope.version_hash();
-        let old_name_hash = *old_envelope.name_hash();
+        let _old_name_hash = *old_envelope.name_hash();
         let new_version_hash = *new_envelope.version_hash();
         
         let (vhash, nhash, payload) = old_envelope.into_parts();
