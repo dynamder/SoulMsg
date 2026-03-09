@@ -128,13 +128,14 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
             });
         }
 
-        //Version Hash 的长度前缀所在的位置
-        offset += 1;
         if bytes[offset] != 32 {
             return Err(EnvelopeError::NotAnEnvelope(
                 "The version hash length prefix is not 32.".to_string(),
             ));
         }
+
+        //跳过Version Hash 的长度前缀所在的位置
+        offset += 1;
 
         let actual_version_hash: [u8; 32] = bytes[offset..offset + 32]
             .try_into()
