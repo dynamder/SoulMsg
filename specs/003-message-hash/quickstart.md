@@ -59,7 +59,7 @@ tx_data.extend_from_slice(&vhash);  // 32 bytes
 tx_data.extend_from_slice(&payload_bytes);
 
 // Receiver: validate and deserialize
-match SmsgEnvelope::<MyMessage>::try_deserialize(tx_data) {
+match SmsgEnvelope::<MyMessage>::try_deserialize(&zenoh::bytes::ZBytes::from(tx_data)) {
     Ok(payload) => println!("Received: {:?}", payload),
     Err(EnvelopeError::TypeMismatch { .. }) => println!("Wrong message type"),
     Err(EnvelopeError::VersionMismatch { .. }) => println!("Schema version changed"),

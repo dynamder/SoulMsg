@@ -50,7 +50,7 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn verify_version(&self, expected: &[u8; 32]) -> bool;
     pub fn verify_name(&self, expected: &[u8; 32]) -> bool;
     
-    pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
+    pub fn try_deserialize(data: &zenoh::bytes::ZBytes) -> Result<T, EnvelopeError>;
 }
 
 impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {
@@ -139,7 +139,7 @@ tx_data.extend_from_slice(&vhash);
 tx_data.extend_from_slice(&payload_bytes);
 
 // Receive with validation
-let result = SmsgEnvelope::<MyMessage>::try_deserialize(tx_data);
+let result = SmsgEnvelope::<MyMessage>::try_deserialize(&zenoh::bytes::ZBytes::from(tx_data));
 match result {
     Ok(payload) => { /* success */ }
     Err(EnvelopeError::NotAnEnvelope(msg)) => { /* not an envelope */ }

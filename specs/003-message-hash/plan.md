@@ -127,7 +127,7 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn name_hash(&self) -> &[u8; 32];
     pub fn verify_version(&self, expected: &[u8; 32]) -> bool;
     pub fn verify_name(&self, expected: &[u8; 32]) -> bool;
-    pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
+    pub fn try_deserialize(data: &zenoh::bytes::ZBytes) -> Result<T, EnvelopeError>;
 }
 
 // zenoh_ext::Serialize implementation - serializes as name_hash + version_hash + payload

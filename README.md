@@ -77,11 +77,10 @@ let envelope = SmsgEnvelope::new(msg);
 
 // Serialize
 let serialized = z_serialize(&envelope);
-let bytes = serialized.to_bytes();
 
 // Deserialize (with type and version verification)
 let received: chat_msgs::ChatMessage =
-    SmsgEnvelope::try_deserialize(bytes).unwrap();
+    SmsgEnvelope::try_deserialize(&serialized).unwrap();
 ```
 
 ### Zenoh-Only Support (Serde Coming Soon)

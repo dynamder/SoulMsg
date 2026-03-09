@@ -63,7 +63,7 @@ pub struct SmsgEnvelope<T> {
 
 impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn new(payload: T) -> Self;
-    pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError>;
+    pub fn try_deserialize(data: &zenoh::bytes::ZBytes) -> Result<T, EnvelopeError>;
 }
 
 impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {

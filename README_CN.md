@@ -77,11 +77,10 @@ let envelope = SmsgEnvelope::new(msg);
 
 // 序列化
 let serialized = z_serialize(&envelope);
-let bytes = serialized.to_bytes();
 
 // 反序列化（带有类型和版本验证）
 let received: chat_msgs::ChatMessage =
-    SmsgEnvelope::try_deserialize(bytes).unwrap();
+    SmsgEnvelope::try_deserialize(&serialized).unwrap();
 ```
 
 ### 仅支持 Zenoh（Serde 即将支持）
