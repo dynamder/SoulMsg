@@ -1,5 +1,5 @@
-use soul_msg::smsg;
 use soul_msg::SmsgEnvelope;
+use soul_msg::smsg;
 use zenoh_ext::z_serialize;
 
 mod chat_module {
@@ -17,10 +17,9 @@ fn main() {
 
     let envelope = SmsgEnvelope::new(msg);
     let serialized = z_serialize(&envelope);
-    let transmitted = serialized.to_bytes();
 
     let received: chat_module::chat_msgs::ChatMessage =
-        SmsgEnvelope::try_deserialize(transmitted).unwrap();
+        SmsgEnvelope::try_deserialize(&serialized).unwrap();
 
     assert_eq!(received.sender, "Alice");
 

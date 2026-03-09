@@ -164,7 +164,7 @@ mod error_handling_tests {
     #[test]
     fn test_try_deserialize_data_too_short() {
         let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> =
-            SmsgEnvelope::try_deserialize(vec![0u8; 32]);
+            SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(vec![0u8; 32]));
         assert!(matches!(result, Err(EnvelopeError::NotAnEnvelope(_))));
     }
 
@@ -179,7 +179,7 @@ mod error_handling_tests {
         let serialized = z_serialize(&pos_envelope);
 
         let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> =
-            SmsgEnvelope::try_deserialize(serialized);
+            SmsgEnvelope::try_deserialize(&serialized);
 
         assert!(matches!(result, Err(EnvelopeError::TypeMismatch { .. })));
     }
@@ -196,7 +196,7 @@ mod error_handling_tests {
         let serialized = z_serialize(&old_envelope);
 
         let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> =
-            SmsgEnvelope::try_deserialize(serialized);
+            SmsgEnvelope::try_deserialize(&serialized);
 
         assert!(matches!(result, Err(EnvelopeError::VersionMismatch { .. })));
     }

@@ -24,10 +24,9 @@ fn test_production_message_pipeline() {
 
     let envelope = SmsgEnvelope::new(msg);
     let serialized = z_serialize(&envelope);
-    let bytes = serialized.to_bytes().to_vec();
 
     let received: chat_module::chat_msgs::ChatMessage =
-        SmsgEnvelope::try_deserialize(bytes).unwrap();
+        SmsgEnvelope::try_deserialize(&serialized).unwrap();
 
     assert_eq!(received.sender, "Alice");
     assert_eq!(received.content, "Hello, World!");
@@ -52,9 +51,9 @@ fn test_production_multiple_message_types() {
     let pos_bytes = z_serialize(&pos_envelope).to_bytes().to_vec();
 
     let chat_received: chat_module::chat_msgs::ChatMessage =
-        SmsgEnvelope::try_deserialize(chat_bytes).unwrap();
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(chat_bytes)).unwrap();
     let pos_received: chat_module::chat_msgs::Position =
-        SmsgEnvelope::try_deserialize(pos_bytes).unwrap();
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(pos_bytes)).unwrap();
 
     assert_eq!(chat_received.sender, "Bob");
     assert_eq!(pos_received.x, 10.0);
@@ -88,7 +87,7 @@ fn test_production_message_broadcasting() {
     for (original, envelope) in messages.iter().zip(envelopes.iter()) {
         let serialized = z_serialize(envelope);
         let deserialized: chat_module::chat_msgs::ChatMessage =
-            SmsgEnvelope::try_deserialize(serialized.to_bytes().to_vec()).unwrap();
+            SmsgEnvelope::try_deserialize(&serialized).unwrap();
 
         assert_eq!(deserialized.sender, original.sender);
         assert_eq!(deserialized.content, original.content);
@@ -112,7 +111,7 @@ fn test_production_robot_state_telemetry() {
     let transmitted = serialized.to_bytes().to_vec();
 
     let received: chat_module::chat_msgs::RobotState =
-        SmsgEnvelope::try_deserialize(transmitted).unwrap();
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(transmitted)).unwrap();
 
     assert_eq!(received.name, "R2-D2");
     assert_eq!(received.position.x, 123.45);
@@ -132,7 +131,7 @@ fn test_production_version_migration_handling() {
     let transmitted = serialized.to_bytes().to_vec();
 
     let received: Result<chat_module::chat_msgs::ChatMessage, EnvelopeError> =
-        SmsgEnvelope::try_deserialize(transmitted);
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(transmitted));
 
     assert!(matches!(
         received,
@@ -154,7 +153,7 @@ fn test_production_graceful_error_recovery() {
     corrupted.push(0xFF);
 
     let result: Result<chat_module::chat_msgs::ChatMessage, EnvelopeError> =
-        SmsgEnvelope::try_deserialize(corrupted);
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(corrupted));
 
     assert!(result.is_err());
 }
@@ -170,7 +169,7 @@ fn test_production_empty_and_minimal_messages() {
     let envelope = SmsgEnvelope::new(empty_msg);
     let serialized = z_serialize(&envelope);
     let deserialized: chat_module::chat_msgs::ChatMessage =
-        SmsgEnvelope::try_deserialize(serialized.to_bytes().to_vec()).unwrap();
+        SmsgEnvelope::try_deserialize(&serialized).unwrap();
 
     assert_eq!(deserialized.sender, "");
     assert_eq!(deserialized.timestamp, 0);
@@ -187,7 +186,7 @@ fn test_production_unicode_and_special_chars() {
     let envelope = SmsgEnvelope::new(msg.clone());
     let serialized = z_serialize(&envelope);
     let deserialized: chat_module::chat_msgs::ChatMessage =
-        SmsgEnvelope::try_deserialize(serialized.to_bytes().to_vec()).unwrap();
+        SmsgEnvelope::try_deserialize(&serialized).unwrap();
 
     assert_eq!(deserialized.sender, msg.sender);
     assert_eq!(deserialized.content, msg.content);
@@ -208,7 +207,7 @@ fn test_production_large_payload() {
     assert!(serialized.to_bytes().len() > 1024 * 50);
 
     let deserialized: chat_module::chat_msgs::ChatMessage =
-        SmsgEnvelope::try_deserialize(serialized.to_bytes().to_vec()).unwrap();
+        SmsgEnvelope::try_deserialize(&serialized).unwrap();
 
     assert_eq!(deserialized.content.len(), msg.content.len());
 }
@@ -224,7 +223,7 @@ fn test_production_type_validation_at_receiver() {
     let serialized = z_serialize(&envelope);
 
     let result: Result<chat_module::chat_msgs::ChatMessage, EnvelopeError> =
-        SmsgEnvelope::try_deserialize(serialized);
+        SmsgEnvelope::try_deserialize(&serialized);
 
     assert!(matches!(result, Err(EnvelopeError::TypeMismatch { .. })));
 }
@@ -243,7 +242,7 @@ fn test_production_empty_payload_zst() {
     );
 
     let received: chat_module::chat_msgs::EmptyMessage =
-        SmsgEnvelope::try_deserialize(bytes).unwrap();
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(bytes)).unwrap();
 
     let _ = received;
 }
@@ -257,7 +256,7 @@ fn test_production_empty_payload_roundtrip() {
     let transmitted = serialized.to_bytes().to_vec();
 
     let _received: chat_module::chat_msgs::EmptyMessage =
-        SmsgEnvelope::try_deserialize(transmitted).unwrap();
+        SmsgEnvelope::try_deserialize(&zenoh::bytes::ZBytes::from(transmitted)).unwrap();
 
     assert!(envelope.verify_version(&chat_module::chat_msgs::EmptyMessage::version_hash()));
     assert!(envelope.verify_name(&chat_module::chat_msgs::EmptyMessage::name_hash()));

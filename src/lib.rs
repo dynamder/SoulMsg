@@ -95,9 +95,8 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
         &self.name_hash == expected_name_hash
     }
 
-    pub fn try_deserialize(data: impl Into<zenoh::bytes::ZBytes>) -> Result<T, EnvelopeError> {
-        let zbytes: zenoh::bytes::ZBytes = data.into();
-        let bytes = zbytes.to_bytes();
+    pub fn try_deserialize(data: &zenoh::bytes::ZBytes) -> Result<T, EnvelopeError> {
+        let bytes = data.to_bytes();
 
         //两个32bit的hash，同时，ZBytes会附加两个长度前缀
         if bytes.len() < 66 {
