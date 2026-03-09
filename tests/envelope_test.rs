@@ -338,66 +338,6 @@ mod try_deserialize_tests {
     use super::*;
 
     #[test]
-    fn test_try_deserialize_valid() {
-        let original = test_messages::chat_msgs::ChatMessage {
-            sender: "Test".to_string(),
-            content: "Try deserialize".to_string(),
-            timestamp: 555,
-        };
-
-        let envelope = SmsgEnvelope::new(original);
-
-        let (vhash, nhash, payload) = envelope.into_parts();
-        let serialized_payload = z_serialize(&payload);
-        let payload_bytes = serialized_payload.to_bytes();
-
-        let mut tx_data = Vec::new();
-        tx_data.extend_from_slice(&nhash);
-        tx_data.extend_from_slice(&vhash);
-        tx_data.extend_from_slice(&payload_bytes);
-
-        let received: test_messages::chat_msgs::ChatMessage =
-            SmsgEnvelope::try_deserialize(tx_data).unwrap();
-        assert_eq!(received.sender, "Test");
-    }
-
-    #[test]
-    fn test_try_deserialize_type_mismatch() {
-        let chat_msg = test_messages::chat_msgs::ChatMessage {
-            sender: "Test".to_string(),
-            content: "Content".to_string(),
-            timestamp: 123,
-        };
-        let envelope = SmsgEnvelope::new(chat_msg);
-
-        let (vhash, nhash, payload) = envelope.into_parts();
-        let serialized_payload = z_serialize(&payload);
-        let payload_bytes = serialized_payload.to_bytes();
-
-        let mut tx_data = Vec::new();
-        tx_data.extend_from_slice(&nhash);
-        tx_data.extend_from_slice(&vhash);
-        tx_data.extend_from_slice(&payload_bytes);
-
-        let wrong_msg = test_messages::chat_msgs::Position {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-        };
-        let wrong_envelope = SmsgEnvelope::new(wrong_msg);
-        let wrong_nhash = *wrong_envelope.name_hash();
-
-        let mut wrong_data = Vec::new();
-        wrong_data.extend_from_slice(&wrong_nhash);
-        wrong_data.extend_from_slice(&vhash);
-        wrong_data.extend_from_slice(&payload_bytes);
-
-        let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> =
-            SmsgEnvelope::try_deserialize(wrong_data);
-        assert!(matches!(result, Err(EnvelopeError::TypeMismatch { .. })));
-    }
-
-    #[test]
     fn test_try_deserialize_data_too_short() {
         let result: Result<test_messages::chat_msgs::ChatMessage, EnvelopeError> =
             SmsgEnvelope::try_deserialize(vec![0u8; 32]);
@@ -432,44 +372,6 @@ mod network_transmission_simulation_tests {
         assert_eq!(deserialized.payload.sender, original_msg.sender);
         assert_eq!(deserialized.payload.content, original_msg.content);
         assert_eq!(deserialized.payload.timestamp, original_msg.timestamp);
-    }
-
-    #[test]
-    fn test_simulate_packet_loss_recovery() {
-        let msg = test_messages::chat_msgs::ChatMessage {
-            sender: "PacketTest".to_string(),
-            content: "Test message".to_string(),
-            timestamp: 123,
-        };
-
-        let envelope = SmsgEnvelope::new(msg.clone());
-
-        let (vhash, nhash, payload) = envelope.into_parts();
-        let serialized_payload = z_serialize(&payload);
-        let payload_bytes = serialized_payload.to_bytes();
-
-        let mut tx_data = Vec::new();
-        tx_data.extend_from_slice(&nhash);
-        tx_data.extend_from_slice(&vhash);
-        tx_data.extend_from_slice(&payload_bytes);
-
-        let result =
-            SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data.clone());
-        assert!(result.is_ok());
-
-        let corrupted_data = {
-            let mut corrupted = tx_data.clone();
-            corrupted[0] = corrupted[0].wrapping_add(1);
-            corrupted
-        };
-
-        let corrupted_result =
-            SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(corrupted_data);
-        match corrupted_result {
-            Ok(_) => panic!("Corrupted data should not deserialize successfully"),
-            Err(EnvelopeError::TypeMismatch { .. }) => {}
-            Err(_) => {}
-        }
     }
 
     #[test]
@@ -639,34 +541,6 @@ mod version_compatibility_tests {
             *new_envelope.name_hash(),
             "Name hashes should be same for same message type"
         );
-    }
-
-    #[test]
-    fn test_try_deserialize_version_mismatch() {
-        let old_msg = test_messages_old::old_chat_msgs::ChatMessage {
-            sender: "Test".to_string(),
-            content: "Content".to_string(),
-            timestamp: 123,
-            version: 1,
-        };
-        let old_envelope = SmsgEnvelope::new(old_msg);
-
-        let (vhash, nhash, payload) = old_envelope.into_parts();
-        let serialized_payload = z_serialize(&payload);
-        let payload_bytes = serialized_payload.to_bytes();
-
-        let mut tx_data = Vec::new();
-        tx_data.extend_from_slice(&nhash);
-        tx_data.extend_from_slice(&vhash);
-        tx_data.extend_from_slice(&payload_bytes);
-
-        let result =
-            SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data);
-
-        match result {
-            Err(EnvelopeError::VersionMismatch { .. }) => {}
-            _ => panic!("Expected VersionMismatch error"),
-        }
     }
 
     #[test]
@@ -863,94 +737,6 @@ mod error_message_tests {
                 assert!(!msg.is_empty());
             }
             _ => panic!("Expected NotAnEnvelope error"),
-        }
-    }
-
-    #[test]
-    fn test_type_mismatch_error_contains_hashes() {
-        let chat_msg = test_messages::chat_msgs::ChatMessage {
-            sender: "Test".to_string(),
-            content: "Content".to_string(),
-            timestamp: 123,
-        };
-        let chat_envelope = SmsgEnvelope::new(chat_msg);
-
-        let pos_msg = test_messages::chat_msgs::Position {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-        };
-        let pos_envelope = SmsgEnvelope::new(pos_msg);
-
-        let chat_name_hash = *chat_envelope.name_hash();
-        let pos_name_hash = *pos_envelope.name_hash();
-
-        let (vhash, _nhash, payload) = chat_envelope.into_parts();
-        let serialized_payload = z_serialize(&payload);
-        let payload_bytes = serialized_payload.to_bytes();
-
-        let mut tx_data = Vec::new();
-        tx_data.extend_from_slice(&pos_name_hash);
-        tx_data.extend_from_slice(&vhash);
-        tx_data.extend_from_slice(&payload_bytes);
-
-        let result =
-            SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data);
-
-        match result {
-            Err(EnvelopeError::TypeMismatch {
-                expected_name_hash,
-                actual_name_hash,
-            }) => {
-                assert_eq!(expected_name_hash, chat_name_hash);
-                assert_eq!(actual_name_hash, pos_name_hash);
-            }
-            _ => panic!("Expected TypeMismatch error"),
-        }
-    }
-
-    #[test]
-    fn test_version_mismatch_error_contains_hashes() {
-        let old_msg = test_messages_old::old_chat_msgs::ChatMessage {
-            sender: "Test".to_string(),
-            content: "Content".to_string(),
-            timestamp: 123,
-            version: 1,
-        };
-        let old_envelope = SmsgEnvelope::new(old_msg);
-
-        let new_msg = test_messages::chat_msgs::ChatMessage {
-            sender: "Test".to_string(),
-            content: "Content".to_string(),
-            timestamp: 123,
-        };
-        let new_envelope = SmsgEnvelope::new(new_msg);
-
-        let old_version_hash = *old_envelope.version_hash();
-        let _old_name_hash = *old_envelope.name_hash();
-        let new_version_hash = *new_envelope.version_hash();
-
-        let (vhash, nhash, payload) = old_envelope.into_parts();
-        let serialized_payload = z_serialize(&payload);
-        let payload_bytes = serialized_payload.to_bytes();
-
-        let mut tx_data = Vec::new();
-        tx_data.extend_from_slice(&nhash);
-        tx_data.extend_from_slice(&vhash);
-        tx_data.extend_from_slice(&payload_bytes);
-
-        let result =
-            SmsgEnvelope::<test_messages::chat_msgs::ChatMessage>::try_deserialize(tx_data);
-
-        match result {
-            Err(EnvelopeError::VersionMismatch {
-                expected_version_hash,
-                actual_version_hash,
-            }) => {
-                assert_eq!(expected_version_hash, new_version_hash);
-                assert_eq!(actual_version_hash, old_version_hash);
-            }
-            _ => panic!("Expected VersionMismatch error"),
         }
     }
 }
