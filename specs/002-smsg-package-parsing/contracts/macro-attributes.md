@@ -22,8 +22,29 @@ The `#[smsg]` proc macro attribute accepts two forms of input for specifying the
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `category` | identifier | No | `file` | Source category: `file` or `package` (no quotes) |
+| `category` | identifier | No | `file` | Source category: `file`, `package`, or `git` (no quotes) |
+| `url` | string literal | Conditional | - | GitHub repository URL (required when `category = git`) |
 | `path` | string literal | Yes | - | Path to .smsg file or package directory (quoted) |
+
+## GitHub API (category = git)
+
+When `category = git`, the macro fetches smsg files directly from GitHub using the REST API:
+
+| Scenario | url | path |
+|----------|-----|------|
+| Public repo file | `https://github.com/owner/repo` | `path/to/file.smsg` |
+
+The `path` is appended to the repository URL when calling the GitHub Contents API:
+```
+GET https://api.github.com/repos/{owner}/{repo}/contents/{path}
+```
+
+### GitHub API Errors
+
+| HTTP Status | Error |
+|-------------|-------|
+| 404 | File not found on GitHub |
+| 403 | Rate limit exceeded (60 req/hour for unauthenticated) |
 
 ## Error Cases
 

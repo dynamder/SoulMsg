@@ -1,0 +1,18 @@
+message ChatMessage {
+    string sender
+    string content
+    int64 timestamp
+    int32 version
+}
+
+message Position {
+    float64 x
+    float64 y
+}
+
+message RobotState {
+    string name
+    Position position
+    int32 status
+    string ip
+}

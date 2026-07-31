@@ -1,4 +1,0 @@
-[submodule "smsg_macro"]
-	path = smsg_macro
-	url = https://github.com/dynamder/SmsgMacro.git
-	branch = main

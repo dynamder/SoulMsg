@@ -98,7 +98,8 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
     pub fn try_deserialize(data: &zenoh::bytes::ZBytes) -> Result<T, EnvelopeError> {
         let bytes = data.to_bytes();
 
-        //两个32bit的hash，同时，ZBytes会附加两个长度前缀
+        // The envelope header is [len:1][name_hash:32][len:1][version_hash:32] == 66 bytes,
+        // encoded by the zenoh-ext serialization of the two [u8; 32] hashes.
         if bytes.len() < 66 {
             return Err(EnvelopeError::NotAnEnvelope(
                 "Data too short: need at least 66 bytes for name_hash (32) + version_hash (32) and two length prefix (2)"
@@ -106,18 +107,12 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
             ));
         }
 
-        if bytes[0] != 32 {
-            return Err(EnvelopeError::NotAnEnvelope(
-                "The name hash length prefix is not 32.".to_string(),
-            ));
-        }
+        let mut deserializer = zenoh_ext::ZDeserializer::new(data);
 
-        let mut offset = 1;
-
-        let actual_name_hash: [u8; 32] = bytes[offset..offset + 32]
-            .try_into()
-            .map_err(|_| EnvelopeError::NotAnEnvelope("Failed to read name_hash".to_string()))?;
-        offset += 32;
+        let actual_name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(&mut deserializer)
+            .map_err(|e| {
+                EnvelopeError::NotAnEnvelope(format!("Failed to read name_hash: {}", e))
+            })?;
 
         let expected_name_hash = T::name_hash();
         if actual_name_hash != expected_name_hash {
@@ -127,19 +122,10 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
             });
         }
 
-        if bytes[offset] != 32 {
-            return Err(EnvelopeError::NotAnEnvelope(
-                "The version hash length prefix is not 32.".to_string(),
-            ));
-        }
-
-        //跳过Version Hash 的长度前缀所在的位置
-        offset += 1;
-
-        let actual_version_hash: [u8; 32] = bytes[offset..offset + 32]
-            .try_into()
-            .map_err(|_| EnvelopeError::NotAnEnvelope("Failed to read version_hash".to_string()))?;
-        offset += 32;
+        let actual_version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(&mut deserializer)
+            .map_err(|e| {
+                EnvelopeError::NotAnEnvelope(format!("Failed to read version_hash: {}", e))
+            })?;
 
         let expected_version_hash = T::version_hash();
         if actual_version_hash != expected_version_hash {
@@ -149,14 +135,16 @@ impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
             });
         }
 
-        //跳过Payload 长度前缀
-        // offset += 1;
+        let payload: T = zenoh_ext::Deserialize::deserialize(&mut deserializer)
+            .map_err(|e| EnvelopeError::DeserializeError(e.to_string()))?;
 
-        let payload_bytes = &bytes[offset..];
-        let payload_zbytes = zenoh::bytes::ZBytes::from(payload_bytes);
+        if !deserializer.done() {
+            return Err(EnvelopeError::NotAnEnvelope(
+                "Trailing data found after the payload.".to_string(),
+            ));
+        }
 
-        zenoh_ext::z_deserialize(&payload_zbytes)
-            .map_err(|e| EnvelopeError::DeserializeError(e.to_string()))
+        Ok(payload)
     }
 }
 
@@ -169,6 +157,10 @@ impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelop
 }
 
 impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
+    /// Reads the envelope from the wire without verifying the hashes against `T`.
+    ///
+    /// Use [`SmsgEnvelope::try_deserialize`] when you want the payload back with
+    /// type/version verification against the expected message type.
     fn deserialize(
         deserializer: &mut zenoh_ext::ZDeserializer,
     ) -> Result<Self, zenoh_ext::ZDeserializeError> {

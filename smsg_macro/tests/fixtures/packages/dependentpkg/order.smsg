@@ -1,0 +1,7 @@
+import testpkg.person.Person
+
+message Order {
+    string order_id
+    Person customer
+    int64 total_amount
+}
