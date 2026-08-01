@@ -2,7 +2,7 @@
 //! protobuf file descriptor set. Used at compile time by the `#[smsg]` macro.
 
 use heck::{ToSnakeCase, ToUpperCamelCase};
-use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro2::TokenStream;
 use prost_types::field_descriptor_proto::{Label, Type};
 use prost_types::{DescriptorProto, FieldDescriptorProto, FileDescriptorSet};
 use quote::quote;
@@ -23,6 +23,17 @@ fn sanitize_identifier(ident: String) -> String {
     } else {
         ident
     }
+}
+
+/// Converts a proto name into a valid Rust identifier, or returns a clear error
+/// (never panics, even for empty or non-identifier input).
+fn rust_ident_or_err(name: &str, kind: &str) -> Result<proc_macro2::Ident, String> {
+    let sanitized = sanitize_identifier(name.to_string());
+    if sanitized.is_empty() {
+        return Err(format!("{} name is empty", kind));
+    }
+    syn::parse_str::<syn::Ident>(&sanitized)
+        .map_err(|_| format!("{} name '{}' is not a valid Rust identifier", kind, name))
 }
 
 /// Generates one item per top-level message: a prost struct + its `EnvelopeMeta`.
@@ -51,10 +62,7 @@ fn generate_message_tokens(package: &str, msg: &DescriptorProto) -> Result<Token
         ));
     }
 
-    let struct_name = Ident::new(
-        &sanitize_identifier(msg.name().to_upper_camel_case()),
-        Span::call_site(),
-    );
+    let struct_name = rust_ident_or_err(&msg.name().to_upper_camel_case(), "message")?;
     let mut fields = Vec::new();
     for f in &msg.field {
         fields.push(generate_field(f)?);
@@ -92,10 +100,7 @@ fn generate_field(f: &FieldDescriptorProto) -> Result<TokenStream, String> {
         ));
     }
 
-    let field_ident = Ident::new(
-        &sanitize_identifier(f.name().to_snake_case()),
-        Span::call_site(),
-    );
+    let field_ident = rust_ident_or_err(&f.name().to_snake_case(), "field")?;
     let tag = f.number();
     let repeated = f.label() == Label::Repeated;
 
@@ -142,10 +147,7 @@ fn field_kind_and_type(f: &FieldDescriptorProto) -> Result<(TokenStream, TokenSt
         Type::Message => {
             let tn = f.type_name();
             let name = tn.rsplit('.').next().unwrap_or(tn);
-            let ident = Ident::new(
-                &sanitize_identifier(name.to_upper_camel_case()),
-                Span::call_site(),
-            );
+            let ident = rust_ident_or_err(&name.to_upper_camel_case(), "type reference")?;
             (quote! { message }, quote! { #ident })
         }
         Type::Enum => {
@@ -168,4 +170,175 @@ fn array_literal(bytes: &[u8; 32]) -> TokenStream {
         .iter()
         .map(|b| proc_macro2::Literal::u8_unsuffixed(*b));
     quote!([#(#parts),*])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use prost_types::field_descriptor_proto::Label;
+    use prost_types::FileDescriptorProto;
+
+    fn name_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("".to_string()),
+            Just("M".to_string()),
+            Just("type".to_string()),
+            Just("struct".to_string()),
+            Just("2bad".to_string()),
+            Just("robot_state".to_string()),
+            prop::string::string_regex("[a-zA-Z0-9_]{0,20}").unwrap(),
+            prop::collection::vec(any::<char>(), 0..6).prop_map(|v| v.into_iter().collect()),
+        ]
+        .boxed()
+    }
+
+    /// Types the codegen supports: every protobuf scalar, bytes, string, and message.
+    fn supported_type_strategy() -> impl Strategy<Value = Type> {
+        prop_oneof![
+            Just(Type::String),
+            Just(Type::Bytes),
+            Just(Type::Bool),
+            Just(Type::Int32),
+            Just(Type::Int64),
+            Just(Type::Uint32),
+            Just(Type::Uint64),
+            Just(Type::Sint32),
+            Just(Type::Sint64),
+            Just(Type::Fixed32),
+            Just(Type::Fixed64),
+            Just(Type::Sfixed32),
+            Just(Type::Sfixed64),
+            Just(Type::Float),
+            Just(Type::Double),
+            Just(Type::Message),
+        ]
+    }
+
+    fn supported_field_strategy() -> impl Strategy<Value = FieldDescriptorProto> {
+        (
+            name_strategy(),
+            any::<i32>(),
+            supported_type_strategy(),
+            prop_oneof![Just(Label::Optional), Just(Label::Repeated)],
+            prop_oneof![
+                Just("".to_string()),
+                Just(".pkg.Other".to_string()),
+                Just(".a.b.C".to_string()),
+            ],
+        )
+            .prop_map(
+                |(name, number, ty, label, type_name)| FieldDescriptorProto {
+                    name: Some(name),
+                    number: Some(number),
+                    r#type: Some(ty as i32),
+                    label: Some(label as i32),
+                    type_name: if type_name.is_empty() {
+                        None
+                    } else {
+                        Some(type_name)
+                    },
+                    ..Default::default()
+                },
+            )
+    }
+
+    fn supported_message_strategy() -> impl Strategy<Value = DescriptorProto> {
+        (
+            name_strategy(),
+            prop::collection::vec(supported_field_strategy(), 0..8),
+        )
+            .prop_map(|(name, field)| DescriptorProto {
+                name: Some(name),
+                field,
+                ..Default::default()
+            })
+    }
+
+    fn supported_set_strategy() -> impl Strategy<Value = FileDescriptorSet> {
+        (
+            name_strategy(),
+            prop::collection::vec(supported_message_strategy(), 0..8),
+        )
+            .prop_map(|(package, message_type)| FileDescriptorSet {
+                file: vec![FileDescriptorProto {
+                    name: Some("p.proto".to_string()),
+                    package: Some(package),
+                    syntax: Some("proto3".to_string()),
+                    message_type,
+                    ..Default::default()
+                }],
+            })
+    }
+
+    proptest! {
+        /// Supported descriptors never panic: Ok code must parse as a syn::File;
+        /// invalid names produce a clean Err instead.
+        #[test]
+        fn supported_descriptors_never_panic_and_parse(set in supported_set_strategy()) {
+            if let Ok(items) = generate(&set) {
+                let tokens = quote!(#(#items)*);
+                let _file: syn::File = syn::parse2(tokens).expect("generated code must parse");
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_features_return_err_not_panic() {
+        let enum_field = FieldDescriptorProto {
+            name: Some("e".to_string()),
+            number: Some(1),
+            r#type: Some(Type::Enum as i32),
+            ..Default::default()
+        };
+        let msg = DescriptorProto {
+            name: Some("WithEnum".to_string()),
+            field: vec![enum_field],
+            ..Default::default()
+        };
+        let set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                package: Some("p".to_string()),
+                message_type: vec![msg],
+                ..Default::default()
+            }],
+        };
+        assert!(generate(&set).is_err());
+
+        // oneof
+        let oneof_msg = DescriptorProto {
+            name: Some("WithOneof".to_string()),
+            oneof_decl: vec![prost_types::OneofDescriptorProto {
+                name: Some("choice".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                package: Some("p".to_string()),
+                message_type: vec![oneof_msg],
+                ..Default::default()
+            }],
+        };
+        assert!(generate(&set).is_err());
+
+        // nested types (also covers map-entry synthetic messages)
+        let nested = DescriptorProto {
+            name: Some("Outer".to_string()),
+            nested_type: vec![DescriptorProto {
+                name: Some("Inner".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                package: Some("p".to_string()),
+                message_type: vec![nested],
+                ..Default::default()
+            }],
+        };
+        assert!(generate(&set).is_err());
+    }
 }

@@ -1,0 +1,28 @@
+[package]
+name = "smsg_core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+smsg_core = { path = ".." }
+prost = "0.14"
+prost-types = "0.14"
+
+[[bin]]
+name = "fuzz_frame"
+path = "fuzz_targets/fuzz_frame.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_hash"
+path = "fuzz_targets/fuzz_hash.rs"
+test = false
+doc = false

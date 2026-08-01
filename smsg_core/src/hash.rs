@@ -4,44 +4,55 @@
 //! language hashing the same `.proto` (via its descriptor) produces identical
 //! hashes — this is the cross-language consistency contract of SoulMsg.
 
-use blake3::Hasher;
 use prost_types::DescriptorProto;
 
 pub const NAME_HASH_DOMAIN: &[u8] = b"smsg_proto:name:v1\0";
 pub const VERSION_HASH_DOMAIN: &[u8] = b"smsg_proto:version:v1\0";
 
-fn write_seg(hasher: &mut Hasher, bytes: &[u8]) {
-    hasher.update(&(bytes.len() as u32).to_le_bytes());
-    hasher.update(bytes);
+/// The exact bytes that feed the `name_hash`: the domain prefix plus a
+/// length-prefixed short name.
+pub fn name_preimage(short_name: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(NAME_HASH_DOMAIN.len() + 4 + short_name.len());
+    out.extend_from_slice(NAME_HASH_DOMAIN);
+    out.extend_from_slice(&(short_name.len() as u32).to_le_bytes());
+    out.extend_from_slice(short_name.as_bytes());
+    out
+}
+
+/// The exact bytes that feed the `version_hash`: the domain prefix, the
+/// length-prefixed full name, the field count, and per field a length-prefixed
+/// name, number, type and (when present) type name.
+pub fn version_preimage(msg: &DescriptorProto, full_name: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(64 + msg.field.len() * 32);
+    out.extend_from_slice(VERSION_HASH_DOMAIN);
+    out.extend_from_slice(&(full_name.len() as u32).to_le_bytes());
+    out.extend_from_slice(full_name.as_bytes());
+    out.extend_from_slice(&(msg.field.len() as u32).to_le_bytes());
+    for f in &msg.field {
+        out.extend_from_slice(&(f.name().len() as u32).to_le_bytes());
+        out.extend_from_slice(f.name().as_bytes());
+        out.extend_from_slice(&f.number().to_le_bytes());
+        let ty = f.r#type() as i32;
+        out.extend_from_slice(&ty.to_le_bytes());
+        if !f.type_name().is_empty() {
+            out.extend_from_slice(&(f.type_name().len() as u32).to_le_bytes());
+            out.extend_from_slice(f.type_name().as_bytes());
+        }
+    }
+    out
 }
 
 /// `name_hash` identifies a message type by its short name. It is stable across
 /// schema edits, so a same-named message in another package gets a type mismatch
 /// only through the version hash.
 pub fn compute_name_hash(short_name: &str) -> [u8; 32] {
-    let mut hasher = Hasher::new();
-    hasher.update(NAME_HASH_DOMAIN);
-    write_seg(&mut hasher, short_name.as_bytes());
-    *hasher.finalize().as_bytes()
+    blake3::hash(&name_preimage(short_name)).into()
 }
 
 /// `version_hash` captures the full definition: the message's full name plus each
 /// field's (name, number, protobuf type, type_name) in declaration order.
 pub fn compute_message_version_hash(msg: &DescriptorProto, full_name: &str) -> [u8; 32] {
-    let mut hasher = Hasher::new();
-    hasher.update(VERSION_HASH_DOMAIN);
-    write_seg(&mut hasher, full_name.as_bytes());
-    hasher.update(&(msg.field.len() as u32).to_le_bytes());
-    for f in &msg.field {
-        write_seg(&mut hasher, f.name().as_bytes());
-        hasher.update(&f.number().to_le_bytes());
-        let ty = f.r#type() as i32;
-        hasher.update(&ty.to_le_bytes());
-        if !f.type_name().is_empty() {
-            write_seg(&mut hasher, f.type_name().as_bytes());
-        }
-    }
-    *hasher.finalize().as_bytes()
+    blake3::hash(&version_preimage(msg, full_name)).into()
 }
 
 /// The full name of a top-level message, given its package and short name.

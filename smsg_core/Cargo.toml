@@ -7,3 +7,6 @@ description = "Shared core for SoulMsg: protobuf-descriptor hashing and envelope
 [dependencies]
 blake3 = "1.5"
 prost-types = "0.14"
+
+[dev-dependencies]
+proptest = "1"

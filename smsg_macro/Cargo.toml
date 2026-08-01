@@ -18,3 +18,4 @@ heck = "0.5"
 [dev-dependencies]
 soul_msg = { path = ".." }
 prost = "0.14"
+proptest = "1"

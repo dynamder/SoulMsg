@@ -11,4 +11,7 @@ pub mod hash;
 pub use frame::{
     envelope_bytes, peek, read_header, EnvelopeError, EnvelopeHeader, Policy, HEADER_LEN,
 };
-pub use hash::{compute_message_version_hash, compute_name_hash, full_message_name};
+pub use hash::{
+    compute_message_version_hash, compute_name_hash, full_message_name, name_preimage,
+    version_preimage,
+};

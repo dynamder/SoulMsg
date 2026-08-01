@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 01a2a65a9ac8747ce5174a997c5adf9ffb062231fe06e52932739512408dec11 # shrinks to set = FileDescriptorSet { file: [FileDescriptorProto { name: Some("p.proto"), package: Some(""), dependency: [], public_dependency: [], weak_dependency: [], message_type: [DescriptorProto { name: Some(""), field: [], extension: [], nested_type: [], enum_type: [], extension_range: [], oneof_decl: [], options: None, reserved_range: [], reserved_name: [] }], enum_type: [], service: [], extension: [], options: None, source_code_info: None, syntax: Some("proto3") }] }
+cc 410a9d344b9423c8d07d61617ab5752a962daa637a2e1cae86c4ff50a842efce # shrinks to set = FileDescriptorSet { file: [FileDescriptorProto { name: Some("p.proto"), package: Some(""), dependency: [], public_dependency: [], weak_dependency: [], message_type: [], enum_type: [], service: [], extension: [], options: None, source_code_info: None, syntax: Some("proto3") }] }
