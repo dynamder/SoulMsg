@@ -1,0 +1,48 @@
+README_CN.md
+  s_20ac50c4861d66::t_e684bea8acbfe0 37-38,43,46-47
+src/lib.rs
+  s_20ac50c4861d66::t_7a46dc7120d472 83
+smsg_macro/tests/fixtures/chat.proto
+  s_20ac50c4861d66::t_0e04af908fbbfa 1-21
+smsg_macro/tests/fixtures/chat_old.proto
+  s_20ac50c4861d66::t_0e04af908fbbfa 1-12
+smsg_macro/src/codegen.rs
+  s_20ac50c4861d66::t_59a8e15c5f5cfd 30,33,35-85
+  s_20ac50c4861d66::t_b364f74947d0d6 1-29,31-32,34,86-151,157-171
+  s_20ac50c4861d66::t_c4612b3e530b51 152-155
+  s_20ac50c4861d66::t_ad172299c4629a 156
+smsg_macro/src/lib.rs
+  s_20ac50c4861d66::t_86b2ef8972b5e4 10
+  s_20ac50c4861d66::t_bc73769ec8fad2 30-45
+  s_20ac50c4861d66::t_824d27b5faf10f 87
+  s_20ac50c4861d66::t_cfeec7eb7e15ab 51-52
+  s_20ac50c4861d66::t_7e6539bbdc3e9a 9
+  s_20ac50c4861d66::t_6f3ed1b68b5458 1-4,12-16,18-22,25-26,53-58,62,64-70,74-79,81-82,84-85,88-89,92
+smsg_macro/Cargo.toml
+  s_20ac50c4861d66::t_64ac9c72062b06 3,11,20
+smsg_macro/tests/macro_test.rs
+  s_20ac50c4861d66::t_7b8376e26cb961 1-3,6,8-12,14-34,38-42,44-47,62-77,91-96,99-106
+proto_poc/src/lib.rs
+  s_20ac50c4861d66::t_acbae6e32f3885 12-13
+  s_20ac50c4861d66::t_7b203deb76081d 3-6,14-18,20-21,23-27
+proto_poc/examples/typed_chat.rs
+  s_20ac50c4861d66::t_066bf55f9e0590 1-3,8-9
+README.md
+  s_20ac50c4861d66::t_d9828e8711b116 43-45,50-52,55-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "b84993f073957d3feb4c41bd90d5265ba4f73572",
+  "prompts": {},
+  "sessions": {
+    "s_20ac50c4861d66": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_047917c32ffeSkUjjXq0FDqMm1",
+        "model": "unknown"
+      },
+      "human_author": "dynamder <igaster@163.com>"
+    }
+  }
+}
