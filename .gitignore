@@ -1,4 +1,17 @@
+# Tooling / editor state
 /.opencode
-/target
 /opencode.json
 /.specify
+
+# Rust build artifacts (workspace root and any nested crate)
+/target
+**/target/
+
+# cargo-fuzz outputs (artifacts, corpus, coverage)
+**/fuzz/artifacts/
+**/fuzz/corpus/
+**/fuzz/coverage/
+
+# Python
+__pycache__/
+*.pyc
