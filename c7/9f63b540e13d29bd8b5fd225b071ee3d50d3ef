@@ -1,0 +1,120 @@
+smsg_ffi/src/lib.rs
+  s_20ac50c4861d66::t_56dd0cf326c29e 1-6
+smsg_macro/src/parser/mod.rs
+  s_20ac50c4861d66::t_5addd9c1a870bd 1-3,5
+smsg_macro/Cargo.toml
+  s_20ac50c4861d66::t_be8a44dba3223e 10
+proto_poc/verification/README.md
+  s_20ac50c4861d66::t_496dd7100c1bfd 1-53
+  s_20ac50c4861d66::t_3f2e4be4b5cd85 54-74
+proto_poc/verification/kotlin/run.sh
+  s_20ac50c4861d66::t_a374f4a0d1b1a0 1-25
+proto_poc/tests/proto_roundtrip.rs
+  s_20ac50c4861d66::t_2a7673c5a277cc 1,3-57,60-113,118-144,147
+  s_20ac50c4861d66::t_a69f9eeef7c2dd 58-59
+  s_20ac50c4861d66::t_92ae103300b6a1 114-117
+  s_20ac50c4861d66::t_476d09fe22a346 2
+  s_20ac50c4861d66::t_429366916f57f1 168,180-188,190-194
+  s_20ac50c4861d66::t_addde9b846b384 148-167,169-179,189,195-223,254-274
+  s_20ac50c4861d66::t_6e8d46bec614da 224-253
+  s_20ac50c4861d66::t_fca11795fc9555 145-146
+proto_poc/verification/go/go.mod
+  s_20ac50c4861d66::t_6b8a6dcdc6bf30 1-3
+  s_20ac50c4861d66::t_43d58caf455f71 4-10
+proto_poc/src/lib.rs
+  s_20ac50c4861d66::t_70684bbbb03351 59-61
+  s_20ac50c4861d66::t_5a1a2256d69fed 48-50,52-53
+  s_20ac50c4861d66::t_1453b096806d00 1-47,51,54-58,62-117,119,121,123,125-127,132-149,170-189,191-194,200-203,216-221,231,249-253
+  s_20ac50c4861d66::t_66941e9b7f289d 190,195-196,240-248
+  s_20ac50c4861d66::t_2183ab07cc661f 150-169,197-199,204-215,222-230,232-239
+  s_20ac50c4861d66::t_25d8c15324b4dd 122,124,128-131
+  s_20ac50c4861d66::t_f128cd692ae68e 118,120
+proto_poc/verification/kotlin/Verify.kt
+  s_20ac50c4861d66::t_2a51481d9d1411 25-29
+  s_20ac50c4861d66::t_f7e8681ba716ef 54-56
+  s_20ac50c4861d66::t_8615fb44579d4b 128
+  s_20ac50c4861d66::t_e2fa1d596a402e 1-24,30-53,57-127,129-132
+smsg_core/src/parser/mod.rs
+  s_20ac50c4861d66::t_de464fb488585f 1-490
+smsg_ffi/src/dynamic.rs
+  s_20ac50c4861d66::t_233bfe3834cd45 1-6,9-193,195-206,208-429
+  s_20ac50c4861d66::t_a49958b59971c9 7-8
+  s_20ac50c4861d66::t_26f6d2331897aa 194,207
+proto_poc/verification/go/main.go
+  s_20ac50c4861d66::t_dc67b47307d2bc 76
+  s_20ac50c4861d66::t_5912e12db2f84b 1-9,11-38,40-47,49-75,77-186
+  s_20ac50c4861d66::t_05dd6c250f9249 10
+  s_20ac50c4861d66::t_274693cbedd7c9 39,48
+smsg_ffi/Cargo.toml
+  s_20ac50c4861d66::t_692822c8155844 1-12,15-17,19-22
+  s_20ac50c4861d66::t_0225ec7b714428 13-14,18
+smsg_core/src/ir.rs
+  s_20ac50c4861d66::t_de464fb488585f 1-150
+smsg_macro/src/lib.rs
+  s_20ac50c4861d66::t_73d0dbbe5f67e2 5
+  s_7140c2abf54abb::t_5109fce9a4773e 6
+smsg_core/src/hash.rs
+  s_20ac50c4861d66::t_de464fb488585f 1-579
+proto_poc/verification/python/verify.py
+  s_20ac50c4861d66::t_227078c2874ead 1-16,20-123
+  s_20ac50c4861d66::t_d8f3ae2969c44c 17-19
+smsg_core/src/error.rs
+  s_20ac50c4861d66::t_66558b3cd3790a 1-87
+proto_poc/build.rs
+  s_20ac50c4861d66::t_19f167372103b8 5,8
+  s_20ac50c4861d66::t_0287f849c7cff5 6-7
+  s_20ac50c4861d66::t_9684d7a3c80b4c 1-4,9-21
+Cargo.toml
+  s_20ac50c4861d66::t_c9002fed9783a6 13
+  s_20ac50c4861d66::t_9b2eb7716e1ed5 7,11-12
+proto_poc/examples/dump_golden.rs
+  s_20ac50c4861d66::t_be422fcc7614ec 1-61
+proto_poc/tests/golden_check.rs
+  s_20ac50c4861d66::t_aa6b7e9424cbcb 1-73
+proto_poc/Cargo.toml
+  s_20ac50c4861d66::t_1dba652daca59d 1-12
+  s_20ac50c4861d66::t_a46592f4485138 13-16
+  s_20ac50c4861d66::t_b5d0a8941cb432 17-18
+proto_poc/verification/golden.json
+  s_20ac50c4861d66::t_5f9bca0c754331 1-17
+proto_poc/proto/chat.proto
+  s_20ac50c4861d66::t_ce460363ff7d3b 1-21
+smsg_core/Cargo.toml
+  s_20ac50c4861d66::t_a4685488ec9378 1-9
+smsg_core/src/lib.rs
+  s_20ac50c4861d66::t_1673e24ffff76b 1-15
+proto_poc/verification/kotlin/.gitignore
+  s_20ac50c4861d66::t_19784c7e2462d8 1-3
+proto_poc/proto/chat_old.proto
+  s_20ac50c4861d66::t_4aefe2ee27392e 1-12
+Cargo.lock
+  s_20ac50c4861d66::t_472b2d6dbeef8c 157-167,228-233,293-311,367-390,572,1036-1056,1680-1685,1718,1825,1859,1902-1907,2143-2152,2171-2297,2478-2489,2579,2643,2824,3068-3086,3098-3099,3101,3103,3131,3208-3213,3247-3257,3306,3334-3342,3564-3572,3665
+proto_poc/verification/descriptors.pb
+  s_20ac50c4861d66::t_74b68fe5f14baa 1-24
+proto_poc/verification/go/go.sum
+  s_20ac50c4861d66::t_f21fb1d633607a 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c79f63b540e13d29bd8b5fd225b071ee3d50d3ef",
+  "prompts": {},
+  "sessions": {
+    "s_20ac50c4861d66": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_047917c32ffeSkUjjXq0FDqMm1",
+        "model": "unknown"
+      },
+      "human_author": "dynamder <igaster@163.com>"
+    },
+    "s_7140c2abf54abb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04793d877ffevW4I3xWWNNyZqn",
+        "model": "unknown"
+      },
+      "human_author": "dynamder <igaster@163.com>"
+    }
+  }
+}
