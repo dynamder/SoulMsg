@@ -1,0 +1,76 @@
+smsg_core/tests/frame_properties.rs
+  s_20ac50c4861d66::t_24115c30f770eb 1-37,40,51-61
+  s_20ac50c4861d66::t_a974529190b524 38-39,41-50
+smsg_core/fuzz/fuzz_targets/fuzz_frame.rs
+  s_20ac50c4861d66::t_968a27bbd7ac90 1-8
+smsg_core/Cargo.toml
+  s_20ac50c4861d66::t_c9890311039b3b 10-12
+Cargo.toml
+  s_20ac50c4861d66::t_af91b60fd6520d 17
+smsg_core/fuzz/Cargo.toml
+  s_20ac50c4861d66::t_3d7dcb30041966 1-13,15-28
+  s_20ac50c4861d66::t_12520141fb2ed5 14
+smsg_core/tests/hash_properties.rs
+  s_20ac50c4861d66::t_2eb8ca72050de6 1-162
+fuzz/Cargo.toml
+  s_20ac50c4861d66::t_5c650f875f8b68 1-13,15-22
+  s_20ac50c4861d66::t_50c34b33f4b7f4 14
+tests/envelope_properties.proptest-regressions
+  s_20ac50c4861d66::t_da261689df82ec 1-7
+smsg_macro/Cargo.toml
+  s_20ac50c4861d66::t_d52f5ed50ef38f 21
+smsg_core/src/hash.rs
+  s_20ac50c4861d66::t_4c4afc32e305c9 12-42,49,55
+smsg_macro/proptest-regressions/codegen.txt
+  s_20ac50c4861d66::t_ab107ff0619475 8
+  s_20ac50c4861d66::t_984612f0c5f9ed 1-7
+tests/envelope_properties.rs
+  s_20ac50c4861d66::t_976e41d30cbab5 1-86,88-114,125-126
+  s_20ac50c4861d66::t_5d28ef616b87a2 87
+  s_20ac50c4861d66::t_4b539232866090 115-124
+smsg_core/fuzz/fuzz_targets/fuzz_hash.rs
+  s_20ac50c4861d66::t_d1295e3e70efec 1-17
+fuzz/.gitignore
+  s_20ac50c4861d66::t_32a7dc1c182fd3 1-3
+smsg_core/tests/frame_properties.proptest-regressions
+  s_20ac50c4861d66::t_45a0674bfcd02e 1-7
+fuzz/fuzz_targets/fuzz_envelope.rs
+  s_20ac50c4861d66::t_92c979bd8453e4 1-59
+smsg_core/src/lib.rs
+  s_20ac50c4861d66::t_8288e8c35859aa 14-17
+smsg_macro/src/codegen.rs
+  s_20ac50c4861d66::t_b7ddf94837f196 275-276,278,282
+  s_20ac50c4861d66::t_3f452cbcfea9ef 279-281
+  s_20ac50c4861d66::t_486cc8453adb89 288-293
+  s_20ac50c4861d66::t_5f34057d9bd334 5
+  s_20ac50c4861d66::t_9d4aff86f4e37c 65
+  s_20ac50c4861d66::t_7b9e903483ea2a 103
+  s_20ac50c4861d66::t_eec359f9424a2e 150
+  s_20ac50c4861d66::t_12fb2220061335 31
+  s_20ac50c4861d66::t_43140b529a8dd9 174-274,277,283-287,294-344
+  s_20ac50c4861d66::t_6fd32662106620 28-30,32-38
+smsg_core/fuzz/.gitignore
+  s_20ac50c4861d66::t_917751af8b5e70 1-3
+Cargo.lock
+  s_20ac50c4861d66::t_9b5a14cb7df9df 32-37,44-64,122-137,150-172,206-211,306-329,339-357,439-444,454-503,530-554,614,624,638,667-679,700-705,718-776
+fuzz/Cargo.lock
+  s_20ac50c4861d66::t_c90553335c95a1 1-244
+smsg_core/fuzz/Cargo.lock
+  s_20ac50c4861d66::t_e6b29882ed1e8f 1-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "10d23fbffa58c16f5a062172c1c9ccb8d9c6bde5",
+  "prompts": {},
+  "sessions": {
+    "s_20ac50c4861d66": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_047917c32ffeSkUjjXq0FDqMm1",
+        "model": "unknown"
+      },
+      "human_author": "dynamder <igaster@163.com>"
+    }
+  }
+}
