@@ -1,0 +1,19 @@
+.gitignore
+  s_20ac50c4861d66::t_74de51226ea3e4 1,5-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c5acf151913d520870955cd1c52fdde94b5103cc",
+  "prompts": {},
+  "sessions": {
+    "s_20ac50c4861d66": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_047917c32ffeSkUjjXq0FDqMm1",
+        "model": "unknown"
+      },
+      "human_author": "dynamder <igaster@163.com>"
+    }
+  }
+}
