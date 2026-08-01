@@ -1,5 +1,0 @@
-message ComplexOrder {
-    string order_id
-    testpkg.person.Person customer
-    int64 total_amount
-}

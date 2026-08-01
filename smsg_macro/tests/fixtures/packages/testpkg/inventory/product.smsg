@@ -1,6 +1,0 @@
-message Product {
-    string id
-    string name
-    float64 price
-    int32 stock
-}

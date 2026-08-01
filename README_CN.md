@@ -2,171 +2,107 @@
 
 [EN](./README.md)
 
-SoulMsg是一个 Rust 消息序列化框架，提供类型安全的版本控制支持。
+基于 protobuf 的 schema 校验消息层：payload 用 [protobuf](https://protobuf.dev/) 编码，外层包裹携带密码学哈希（Blake3）的信封，用于**消息身份**与**定义版本**校验。
 
 ## 概述
 
-SoulMsg 是一个将自定义 DSL（`.smsg` 文件）与自动 Rust 结构体生成相结合的消息序列化库。消息被封装在包含加密哈希（Blake3）的SmsgEnvelope中，用于版本和类型验证，支持分布式系统中的安全模式演进。
+SoulMsg 在 protobuf payload 之上增加哈希信封：
+
+```
+[name_hash:32][version_hash:32][payload_len:u32(LE)][protobuf payload]
+```
+
+- `name_hash` —— 按短消息名标识类型（schema 编辑时保持稳定）。
+- `version_hash` —— 覆盖完整定义（消息名 + 字段），任何 schema 变化都会检测到。
+- 两个哈希均从 protoc **file descriptor set** 规范计算，因此只要对同一 `.proto` 哈希，各语言产出**逐字节一致**（已在 Rust / Python / Go / Kotlin 验证，见 `proto_poc/verification`）。
+
+解码为策略驱动：`Strict`（默认）拒绝哈希不匹配；`Lenient` 跳过哈希校验，依赖 protobuf 的容忍式 schema 演进。
 
 ## 特性
 
-- **自定义 DSL**：使用简单的 `.smsg` 文件格式定义消息
-- **过程宏生成**：从 `.smsg` 定义自动生成 Rust 结构体
-- **类型安全**：加密名称哈希防止将消息反序列化为错误的类型
-- **版本跟踪**：版本哈希支持检测模式变更
-- **Zenoh 集成**：基于 Zenoh 实现高效序列化/反序列化（目前仅支持 Zenoh，即将支持 Serde）
+- **protobuf payload**：复用整个 protobuf 生态（工具链、代码生成、conformance）
+- **schema 身份**：线上携带密码学 `name_hash` / `version_hash`
+- **默认严格、可按需宽松**：严格校验或容忍演进
+- **跨语言**：Python / Go / Kotlin 均有薄 `soulmsg` 绑定，字节一致
+- **仅字节层**：库只产出/消费字节；传输（zenoh 等）自行携带
 
 ## 安装
 
-添加到 `Cargo.toml`：
-
 ```toml
 [dependencies]
-soul_msg = "0.1"
-zenoh = "1.7"
-zenoh-ext = "1.7"
+soul_msg = "0.2"
+prost = "0.14"
+
+[build-dependencies]
+prost-build = "0.14"
 ```
 
-## 使用方法
+## 用法（Rust）
 
-### 定义消息（.smsg 文件）
+### 1. 定义消息并生成代码
 
-创建 `.smsg` 文件来定义您的消息类型：
+编写 `.proto`，用 prost-build 编译，并给模块挂上 `#[smsg]` 宏。宏在编译期读取 descriptor set，为匹配包内的每个消息生成 `EnvelopeMeta`：
 
-```smsg
-message ChatMessage {
-    string sender
-    string content
-    int64 timestamp
-}
-
-message Position {
-    float64 x
-    float64 y
-    float64 z
+```rust
+#[smsg("descriptors.pb")] // 由 prost-build / protoc --descriptor_set_out 产出
+pub mod chat {
+    include!(concat!(env!("OUT_DIR"), "/chat.rs"));
 }
 ```
 
-### 生成 Rust 代码
-
-使用 `#[smsg]` 属性宏从 `.smsg` 文件生成 Rust 代码：
+### 2. 序列化 / 反序列化
 
 ```rust
-use soul_msg::{smsg, MessageMeta, SmsgEnvelope};
-use zenoh_ext::z_serialize;
+use soul_msg::{Envelope, EnvelopeError, Policy};
 
-#[smsg(category = file, path = "messages.smsg")]
-pub mod chat_msgs {}
-```
-
-### 序列化和反序列化
-
-```rust
-use soul_msg::SmsgEnvelope;
-use zenoh_ext::z_serialize;
-
-// 创建消息
-let msg = chat_msgs::ChatMessage {
+// 发送：类型即 schema，无需运行时元数据。
+let msg = chat::ChatMessage {
     sender: "Alice".to_string(),
     content: "Hello, World!".to_string(),
-    timestamp: 1699999999,
+    timestamp: 1_699_999_999,
 };
+let wire: Vec<u8> = Envelope::new_typed(&msg).to_bytes();
 
-// 封装到带有版本/名称哈希的信封中
-let envelope = SmsgEnvelope::new(msg);
+// 接收：默认严格。
+let received: chat::ChatMessage = Envelope::try_deserialize_typed(&wire)?;
 
-// 序列化
-let serialized = z_serialize(&envelope);
-
-// 反序列化（带有类型和版本验证）
-let received: chat_msgs::ChatMessage =
-    SmsgEnvelope::try_deserialize(&serialized).unwrap();
+// 接收：宽松（protobuf 容忍演进）。
+let received: chat::ChatMessage =
+    Envelope::try_deserialize_with_policy_typed(&wire, Policy::Lenient)?;
 ```
 
-### 仅支持 Zenoh（Serde 即将支持）
+### 3. 运行时 Schema（动态 / 分发）
 
-目前，SoulMsg 仅支持通过 **Zenoh** 和 `zenoh-ext` 进行序列化。这是分布式系统和发布/订阅消息的默认推荐后端。
-
-**Serde 支持正在规划中**，将在未来版本中添加，以满足不需要 Zenoh 的使用场景。
-
-## 包支持
-
-SoulMsg 支持将消息组织成**包**，适用于较大的项目。包是一个包含以下内容的目录：
-
-1. 定义包元数据的 `package.toml` 文件
-2. 在子目录中组织的多个 `.smsg` 文件
-
-### 创建包
-
-创建如下目录结构：
-
-```
-mypackage/
-├── package.toml
-├── person.smsg
-└── orders/
-    └── order.smsg
-```
-
-`package.toml` 应包含：
-
-```toml
-[package]
-name = "mypackage"
-version = "1.0.0"
-edition = "2026"
-```
-
-像往常一样在 `.smsg` 文件中定义消息。子目录变成 Rust 模块。
-
-### 使用包
-
-使用 `category = package` 属性：
+当收包时不知道具体类型（如订阅者接收多种消息），可在运行时加载 descriptor set 并 peek 哈希分发：
 
 ```rust
-#[smsg(category = package, path = "path/to/mypackage")]
-pub mod mypackage {}
+use soul_msg::Schema;
+
+let schema = Schema::from_descriptor_set(include_bytes!("descriptors.pb"))?;
+let (name_hash, version_hash) = Envelope::peek(&wire)?;
+let meta = schema.by_name_hash(&name_hash); // -> MessageRef
 ```
 
-这将生成与您的目录结构匹配的模块层次结构：
+## 跨语言绑定
 
-```rust
-use mypackage::person::Person;
-use mypackage::orders::Order;
-```
+各语言使用自己的 protobuf 运行时；`soulmsg` 绑定只增加约 100 行哈希 + 分帧 + 策略代码，均与 Rust 逐字节一致验证：
 
-包支持：
-- **模块化组织**：将相关消息分组
-- **命名空间**：避免消息类型之间的名称冲突
-- **选择性导入**：仅导入需要的消息
+| 语言 | 绑定 | payload 编解码 |
+|------|------|----------------|
+| Rust | `soul_msg` + `smsg_macro` | prost |
+| Python | `bindings/python/soulmsg` | protobuf（`pip install protobuf blake3`） |
+| Go | `bindings/go/soulmsg` | protobuf-go + blake3 |
+| Kotlin/JVM | `bindings/kotlin/soulmsg` | protobuf-java + BouncyCastle |
 
-## 支持的类型
-
-| .smsg 类型 | Rust 类型 |
-|------------|-----------|
-| `string`   | `String`  |
-| `int32`    | `i32`     |
-| `int64`    | `i64`     |
-| `float32`  | `f32`     |
-| `float64`  | `f64`     |
-| `bool`     | `bool`    |
-| `bytes`    | `Vec<u8>` |
-
-也支持嵌套消息。
+逐字节一致性验证见 `proto_poc/verification/README.md`。
 
 ## 错误处理
 
-`SmsgEnvelope::try_deserialize` 对各种失败情况返回 `EnvelopeError`：
+- `NotAnEnvelope` —— 数据过短 / payload 长度分帧不符
+- `TypeMismatch` —— `name_hash` 与期望消息不符
+- `VersionMismatch` —— `version_hash` 与期望定义不符
+- `DeserializeError` —— protobuf payload 解码失败
 
-- `NotAnEnvelope`：数据太短或长度前缀无效
-- `TypeMismatch`：消息名称哈希与预期类型不匹配
-- `VersionMismatch`：消息版本哈希与预期版本不匹配
-- `DeserializeError`：反序列化有效载荷失败
-
-## 许可证
+## License
 
 MIT
-
----
-
-[English README](./README.md)

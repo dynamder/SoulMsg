@@ -2,8 +2,8 @@
 name = "smsg_core"
 version = "0.1.0"
 edition = "2024"
-description = "Shared core for SoulMsg: .smsg IR, parser, and message hashing (language-neutral)."
+description = "Shared core for SoulMsg: protobuf-descriptor hashing and envelope framing (language-neutral)."
 
 [dependencies]
 blake3 = "1.5"
-winnow = "0.7"
+prost-types = "0.14"

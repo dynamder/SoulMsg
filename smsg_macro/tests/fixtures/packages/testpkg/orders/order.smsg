@@ -1,5 +1,0 @@
-message Order {
-    string order_id
-    string customer_name
-    int64 total_amount
-}

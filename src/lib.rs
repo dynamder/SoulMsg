@@ -1,177 +1,189 @@
-pub use smsg_macro::smsg;
+//! SoulMsg: schema-verified protobuf messages wrapped in a hash envelope.
+//!
+//! Payloads are encoded with protobuf (via [`prost`]); the envelope carries a
+//! `name_hash` (message identity) and `version_hash` (definition identity)
+//! derived canonically from the protoc descriptor set, so any language hashing
+//! the same `.proto` produces identical bytes.
+//!
+//! Wire layout: `[name_hash:32][version_hash:32][payload_len:u32(LE)][payload]`.
+//! This crate only produces/consumes bytes (byte layer); transports such as zenoh
+//! put the bytes into their payloads.
 
-pub trait MessageMeta {
-    fn version_hash() -> [u8; 32];
-    fn name_hash() -> [u8; 32];
-    fn message_name() -> &'static str;
+use std::collections::HashMap;
+
+use prost::Message;
+use prost_types::FileDescriptorSet;
+
+pub use smsg_core::{EnvelopeError, Policy, HEADER_LEN};
+
+/// Schema-derived metadata for a single message type.
+#[derive(Debug, Clone)]
+pub struct MessageRef {
+    pub full_name: String,
+    pub name_hash: [u8; 32],
+    pub version_hash: [u8; 32],
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum EnvelopeError {
-    NotAnEnvelope(String),
-    TypeMismatch {
-        expected_name_hash: [u8; 32],
-        actual_name_hash: [u8; 32],
-    },
-    VersionMismatch {
-        expected_version_hash: [u8; 32],
-        actual_version_hash: [u8; 32],
-    },
-    DeserializeError(String),
+/// A parsed descriptor set with per-message hashes and lookups.
+#[derive(Debug)]
+pub struct Schema {
+    pub messages: Vec<MessageRef>,
+    index_by_name: HashMap<String, usize>,
+    index_by_name_hash: HashMap<[u8; 32], usize>,
 }
 
-impl std::fmt::Display for EnvelopeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EnvelopeError::NotAnEnvelope(msg) => {
-                write!(f, "Not an envelope: {}", msg)
+impl Schema {
+    /// Builds a schema from a protoc `FileDescriptorSet` (e.g. the
+    /// `--descriptor_set_out` artifact), computing name/version hashes for every
+    /// message.
+    pub fn from_descriptor_set(bytes: &[u8]) -> Result<Self, String> {
+        let set = FileDescriptorSet::decode(bytes).map_err(|e| e.to_string())?;
+        let mut messages = Vec::new();
+        for file in &set.file {
+            let package = file.package();
+            for msg in &file.message_type {
+                let short = msg.name();
+                let full = smsg_core::full_message_name(package, short);
+                let version_hash = smsg_core::compute_message_version_hash(msg, &full);
+                messages.push(MessageRef {
+                    full_name: full,
+                    name_hash: smsg_core::compute_name_hash(short),
+                    version_hash,
+                });
             }
-            EnvelopeError::TypeMismatch {
-                expected_name_hash,
-                actual_name_hash,
-            } => {
-                write!(
-                    f,
-                    "Type mismatch: expected name_hash {:02x?}, got {:02x?}",
-                    expected_name_hash, actual_name_hash
-                )
-            }
-            EnvelopeError::VersionMismatch {
-                expected_version_hash,
-                actual_version_hash,
-            } => {
-                write!(
-                    f,
-                    "Version mismatch: expected version_hash {:02x?}, got {:02x?}",
-                    expected_version_hash, actual_version_hash
-                )
-            }
-            EnvelopeError::DeserializeError(msg) => {
-                write!(f, "Deserialize error: {}", msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for EnvelopeError {}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SmsgEnvelope<T> {
-    version_hash: [u8; 32],
-    name_hash: [u8; 32],
-    pub payload: T,
-}
-
-impl<T: MessageMeta + zenoh_ext::Deserialize> SmsgEnvelope<T> {
-    pub fn new(payload: T) -> Self {
-        Self {
-            version_hash: T::version_hash(),
-            name_hash: T::name_hash(),
-            payload,
-        }
-    }
-
-    pub fn into_parts(self) -> ([u8; 32], [u8; 32], T) {
-        (self.version_hash, self.name_hash, self.payload)
-    }
-
-    pub fn into_payload(self) -> T {
-        self.payload
-    }
-
-    pub fn version_hash(&self) -> &[u8; 32] {
-        &self.version_hash
-    }
-
-    pub fn name_hash(&self) -> &[u8; 32] {
-        &self.name_hash
-    }
-
-    pub fn verify_version(&self, expected_version: &[u8; 32]) -> bool {
-        &self.version_hash == expected_version
-    }
-
-    pub fn verify_name(&self, expected_name_hash: &[u8; 32]) -> bool {
-        &self.name_hash == expected_name_hash
-    }
-
-    pub fn try_deserialize(data: &zenoh::bytes::ZBytes) -> Result<T, EnvelopeError> {
-        let bytes = data.to_bytes();
-
-        // The envelope header is [len:1][name_hash:32][len:1][version_hash:32] == 66 bytes,
-        // encoded by the zenoh-ext serialization of the two [u8; 32] hashes.
-        if bytes.len() < 66 {
-            return Err(EnvelopeError::NotAnEnvelope(
-                "Data too short: need at least 66 bytes for name_hash (32) + version_hash (32) and two length prefix (2)"
-                    .to_string(),
-            ));
         }
 
-        let mut deserializer = zenoh_ext::ZDeserializer::new(data);
-
-        let actual_name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(&mut deserializer)
-            .map_err(|e| {
-                EnvelopeError::NotAnEnvelope(format!("Failed to read name_hash: {}", e))
-            })?;
-
-        let expected_name_hash = T::name_hash();
-        if actual_name_hash != expected_name_hash {
-            return Err(EnvelopeError::TypeMismatch {
-                expected_name_hash,
-                actual_name_hash,
-            });
+        let mut index_by_name = HashMap::new();
+        let mut index_by_name_hash = HashMap::new();
+        for (i, m) in messages.iter().enumerate() {
+            index_by_name.insert(m.full_name.clone(), i);
+            index_by_name_hash.insert(m.name_hash, i);
         }
 
-        let actual_version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(&mut deserializer)
-            .map_err(|e| {
-                EnvelopeError::NotAnEnvelope(format!("Failed to read version_hash: {}", e))
-            })?;
-
-        let expected_version_hash = T::version_hash();
-        if actual_version_hash != expected_version_hash {
-            return Err(EnvelopeError::VersionMismatch {
-                expected_version_hash,
-                actual_version_hash,
-            });
-        }
-
-        let payload: T = zenoh_ext::Deserialize::deserialize(&mut deserializer)
-            .map_err(|e| EnvelopeError::DeserializeError(e.to_string()))?;
-
-        if !deserializer.done() {
-            return Err(EnvelopeError::NotAnEnvelope(
-                "Trailing data found after the payload.".to_string(),
-            ));
-        }
-
-        Ok(payload)
-    }
-}
-
-impl<T: MessageMeta + zenoh_ext::Serialize> zenoh_ext::Serialize for SmsgEnvelope<T> {
-    fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer) {
-        self.name_hash.serialize(serializer);
-        self.version_hash.serialize(serializer);
-        self.payload.serialize(serializer);
-    }
-}
-
-impl<T: MessageMeta + zenoh_ext::Deserialize> zenoh_ext::Deserialize for SmsgEnvelope<T> {
-    /// Reads the envelope from the wire without verifying the hashes against `T`.
-    ///
-    /// Use [`SmsgEnvelope::try_deserialize`] when you want the payload back with
-    /// type/version verification against the expected message type.
-    fn deserialize(
-        deserializer: &mut zenoh_ext::ZDeserializer,
-    ) -> Result<Self, zenoh_ext::ZDeserializeError> {
-        let name_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
-        let version_hash: [u8; 32] = zenoh_ext::Deserialize::deserialize(deserializer)?;
-        let payload: T = zenoh_ext::Deserialize::deserialize(deserializer)?;
-
-        Ok(SmsgEnvelope {
-            name_hash,
-            version_hash,
-            payload,
+        Ok(Schema {
+            messages,
+            index_by_name,
+            index_by_name_hash,
         })
+    }
+
+    pub fn by_name(&self, full_name: &str) -> Option<&MessageRef> {
+        self.index_by_name
+            .get(full_name)
+            .map(|i| &self.messages[*i])
+    }
+
+    pub fn by_name_hash(&self, name_hash: &[u8; 32]) -> Option<&MessageRef> {
+        self.index_by_name_hash
+            .get(name_hash)
+            .map(|i| &self.messages[*i])
+    }
+}
+
+/// Compile-time message metadata. Generated by the `#[smsg("descriptors.pb")]`
+/// attribute macro, or implemented manually.
+pub trait EnvelopeMeta {
+    const NAME_HASH: [u8; 32];
+    const VERSION_HASH: [u8; 32];
+    const FULL_NAME: &'static str;
+}
+
+/// A message wrapped with its schema hashes. The payload is protobuf-encoded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Envelope {
+    pub name_hash: [u8; 32],
+    pub version_hash: [u8; 32],
+    pub payload: Vec<u8>,
+}
+
+impl Envelope {
+    /// Wraps a message using runtime schema metadata.
+    pub fn new<T: prost::Message>(msg: &T, meta: &MessageRef) -> Self {
+        Self {
+            name_hash: meta.name_hash,
+            version_hash: meta.version_hash,
+            payload: msg.encode_to_vec(),
+        }
+    }
+
+    /// Wraps a message using its compile-time [`EnvelopeMeta`].
+    pub fn new_typed<T: prost::Message + EnvelopeMeta>(msg: &T) -> Self {
+        Self {
+            name_hash: T::NAME_HASH,
+            version_hash: T::VERSION_HASH,
+            payload: msg.encode_to_vec(),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        smsg_core::envelope_bytes(&self.name_hash, &self.version_hash, &self.payload)
+    }
+
+    /// Strict decode against runtime schema metadata (default policy).
+    pub fn try_deserialize<T: prost::Message + Default>(
+        bytes: &[u8],
+        meta: &MessageRef,
+    ) -> Result<T, EnvelopeError> {
+        Self::try_deserialize_with_policy(bytes, meta, Policy::Strict)
+    }
+
+    /// Decode against runtime schema metadata under the given policy.
+    pub fn try_deserialize_with_policy<T: prost::Message + Default>(
+        bytes: &[u8],
+        meta: &MessageRef,
+        policy: Policy,
+    ) -> Result<T, EnvelopeError> {
+        let header = smsg_core::read_header(bytes)?;
+        if policy == Policy::Strict {
+            if header.name_hash != meta.name_hash {
+                return Err(EnvelopeError::TypeMismatch {
+                    expected_name_hash: meta.name_hash,
+                    actual_name_hash: header.name_hash,
+                });
+            }
+            if header.version_hash != meta.version_hash {
+                return Err(EnvelopeError::VersionMismatch {
+                    expected_version_hash: meta.version_hash,
+                    actual_version_hash: header.version_hash,
+                });
+            }
+        }
+        T::decode(&bytes[HEADER_LEN..]).map_err(|e| EnvelopeError::DeserializeError(e.to_string()))
+    }
+
+    /// Strict decode against compile-time metadata (no schema object needed).
+    pub fn try_deserialize_typed<T: prost::Message + Default + EnvelopeMeta>(
+        bytes: &[u8],
+    ) -> Result<T, EnvelopeError> {
+        Self::try_deserialize_with_policy_typed(bytes, Policy::Strict)
+    }
+
+    /// Decode against compile-time metadata under the given policy.
+    pub fn try_deserialize_with_policy_typed<T: prost::Message + Default + EnvelopeMeta>(
+        bytes: &[u8],
+        policy: Policy,
+    ) -> Result<T, EnvelopeError> {
+        let header = smsg_core::read_header(bytes)?;
+        if policy == Policy::Strict {
+            if header.name_hash != T::NAME_HASH {
+                return Err(EnvelopeError::TypeMismatch {
+                    expected_name_hash: T::NAME_HASH,
+                    actual_name_hash: header.name_hash,
+                });
+            }
+            if header.version_hash != T::VERSION_HASH {
+                return Err(EnvelopeError::VersionMismatch {
+                    expected_version_hash: T::VERSION_HASH,
+                    actual_version_hash: header.version_hash,
+                });
+            }
+        }
+        T::decode(&bytes[HEADER_LEN..]).map_err(|e| EnvelopeError::DeserializeError(e.to_string()))
+    }
+
+    /// Extracts the two hashes from an envelope without decoding the payload,
+    /// for dispatch when the message type is not known ahead of time.
+    pub fn peek(bytes: &[u8]) -> Result<([u8; 32], [u8; 32]), EnvelopeError> {
+        smsg_core::peek(bytes)
     }
 }

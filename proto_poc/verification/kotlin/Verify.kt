@@ -1,76 +1,40 @@
-// Kotlin (JVM) verification of the smsg_proto envelope against the Rust golden dump.
+// Kotlin (JVM) verification of the SoulMsg envelope against the Rust golden dump,
+// using the `soulmsg` binding.
 //
-// Uses protobuf-java descriptors + DynamicMessage (no code generation needed) and
-// BouncyCastle BLAKE3. Run with:
-//   kotlinc Verify.kt -include-runtime -d verify.jar -cp protobuf-java.jar:bcprov-jdk18on.jar
-//   java -cp verify.jar;protobuf-java.jar;bcprov-jdk18on.jar;kotlin-stdlib.jar VerifyKt
+// Uses protobuf-java descriptors + DynamicMessage (no code generation needed).
+// Run with:
+//   kotlinc SoulMsg.kt Verify.kt -include-runtime -d verify.jar \
+//     -cp protobuf-java.jar:bcprov-jdk18on.jar:json.jar:kotlin-stdlib.jar:kotlin-reflect.jar
+//   java -cp verify.jar;protobuf-java.jar;bcprov-jdk18on.jar;json.jar;kotlin-stdlib.jar;kotlin-reflect.jar \
+//     VerifyKt <verif-dir>
 //
-// Paths: descriptors.pb and golden.json are one level above this file.
+// verif-dir contains descriptors.pb and golden.json.
 
 import com.google.protobuf.DescriptorProtos
 import com.google.protobuf.DynamicMessage
+import org.json.JSONObject
+import soulmsg.Envelope
+import soulmsg.Policy
+import soulmsg.Schema
 import java.io.File
 
-private val NAME_DOMAIN = "smsg_proto:name:v1\u0000".toByteArray(Charsets.UTF_8)
-private val VERSION_DOMAIN = "smsg_proto:version:v1\u0000".toByteArray(Charsets.UTF_8)
-
-private fun u32le(n: Int): ByteArray = byteArrayOf(
-    (n and 0xff).toByte(), ((n ushr 8) and 0xff).toByte(),
-    ((n ushr 16) and 0xff).toByte(), ((n ushr 24) and 0xff).toByte(),
-)
-
-private fun seg(b: ByteArray): ByteArray = u32le(b.size) + b
-
-private fun blake3(vararg chunks: ByteArray): ByteArray {
-    val d = org.bouncycastle.crypto.digests.Blake3Digest()
-    for (c in chunks) d.update(c, 0, c.size)
-    val out = ByteArray(32)
-    d.doFinal(out, 0)
-    return out
-}
-
-private fun nameHash(short: String): ByteArray =
-    blake3(NAME_DOMAIN, seg(short.toByteArray(Charsets.UTF_8)))
-
-private fun versionHash(full: String, msg: DescriptorProtos.DescriptorProto): ByteArray {
-    val chunks = ArrayList<ByteArray>()
-    chunks.add(VERSION_DOMAIN)
-    chunks.add(seg(full.toByteArray(Charsets.UTF_8)))
-    chunks.add(u32le(msg.fieldCount))
-    for (f in msg.fieldList) {
-        chunks.add(seg(f.name.toByteArray(Charsets.UTF_8)))
-        chunks.add(u32le(f.number))
-        chunks.add(u32le(f.type.number))
-        if (f.typeName.isNotEmpty()) chunks.add(seg(f.typeName.toByteArray(Charsets.UTF_8)))
-    }
-    return blake3(*chunks.toTypedArray())
-}
-
-private fun envelope(name: ByteArray, version: ByteArray, payload: ByteArray): ByteArray =
-    name + version + u32le(payload.size) + payload
-
-private fun hex(b: ByteArray): String = b.joinToString("") { "%02x".format(it) }
-
 fun main(args: Array<String>) {
-    // verif dir (containing descriptors.pb and golden.json) passed as the first argument.
     val verif = File(if (args.isNotEmpty()) args[0] else "..")
-    val fds = DescriptorProtos.FileDescriptorSet.parseFrom(File(verif, "descriptors.pb").readBytes())
-    val golden = org.json.JSONObject(File(verif, "golden.json").readText())
-    val messages = golden.getJSONObject("messages")
+    val schema = Schema.fromDescriptorFile(File(verif, "descriptors.pb").absolutePath)
 
-    val fd = com.google.protobuf.Descriptors.FileDescriptor.buildFrom(fds.fileList[0], arrayOf())
+    val golden = JSONObject(File(verif, "golden.json").readText())
+    val messages = golden.getJSONObject("messages")
+    val fd = com.google.protobuf.Descriptors.FileDescriptor.buildFrom(
+        DescriptorProtos.FileDescriptorSet.parseFrom(File(verif, "descriptors.pb").readBytes()).fileList[0],
+        arrayOf(),
+    )
     var failures = 0
 
-    // golden message order is fixed by the JSON; iterate its keys.
     val it = messages.keys()
     while (it.hasNext()) {
         val fullName = it.next()
         val expected = messages.getJSONObject(fullName)
-        val short = fullName.substringAfterLast('.')
-
-        val msgDesc = findMessageProto(fds, fullName)
-        val nameH = nameHash(short)
-        val versionH = versionHash(fullName, msgDesc)
+        val meta = schema.byName(fullName) ?: error("message not found: $fullName")
 
         val md = fd.messageTypes.first { m -> m.fullName == fullName }
         val builder = DynamicMessage.newBuilder(md)
@@ -92,14 +56,16 @@ fun main(args: Array<String>) {
                 builder.setField(md.findFieldByName("status"), 42)
             }
         }
-        val payload = builder.build().toByteArray()
-        val envelopeBytes = envelope(nameH, versionH, payload)
+        val msg = builder.build()
+        val wire = Envelope.new(msg, meta)
+        val roundtripped = Envelope.tryDeserialize(wire, meta, DynamicMessage.newBuilder(md), Policy.STRICT)
+        check(roundtripped == msg) { "roundtrip mismatch for $fullName" }
 
         val checks = mapOf(
-            "name_hash" to hex(nameH),
-            "version_hash" to hex(versionH),
-            "payload" to hex(payload),
-            "envelope" to hex(envelopeBytes),
+            "name_hash" to hex(meta.nameHash),
+            "version_hash" to hex(meta.versionHash),
+            "payload" to hex(msg.toByteArray()),
+            "envelope" to hex(wire),
         )
         var ok = true
         for ((k, v) in checks) {
@@ -109,24 +75,14 @@ fun main(args: Array<String>) {
                 failures++
             }
         }
-        println(if (ok) "[kotlin] $fullName: all match rust" else "[kotlin] $fullName: MISMATCH")
+        println(if (ok) "[kotlin] $fullName: match (via soulmsg binding)" else "[kotlin] $fullName: MISMATCH")
     }
 
     if (failures > 0) {
         println("\n[kotlin] FAIL: $failures mismatches")
         kotlin.system.exitProcess(1)
     }
-    println("\n[kotlin] PASS: byte-for-byte identical to Rust for all messages")
+    println("\n[kotlin] PASS: byte-for-byte identical to Rust (via soulmsg binding)")
 }
 
-private fun findMessageProto(
-    fds: DescriptorProtos.FileDescriptorSet,
-    fullName: String,
-): DescriptorProtos.DescriptorProto {
-    for (f in fds.fileList) {
-        for (m in f.messageTypeList) {
-            if ("${f.`package`}.${m.name}" == fullName) return m
-        }
-    }
-    error("message not found: $fullName")
-}
+private fun hex(b: ByteArray): String = b.joinToString("") { "%02x".format(it) }

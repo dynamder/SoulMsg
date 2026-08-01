@@ -1,5 +1,0 @@
-message Person {
-    string name
-    int32 age
-    string email
-}

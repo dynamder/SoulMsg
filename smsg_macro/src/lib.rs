@@ -1,510 +1,131 @@
-mod codegen;
-mod error;
-mod parser;
+use std::path::Path;
 
-use smsg_core::{hash, ir};
-
-use codegen::struct_gen::{ModuleGenerator, StructGenerator};
-use codegen::validate::{validate_module_structure, validate_smsg_file};
-use codegen::{derive_gen::DeriveGenerator, CodeGenerator};
-use parser::github::{
-    fetch_directory_contents_recursive, fetch_file_content_at_ref, parse_github_url,
-    parse_path_with_ref,
-};
-use parser::package_parser::{build_module_structure, parse_package_toml, walk_package_directory};
-use parser::parse_smsg;
+use heck::ToUpperCamelCase;
 use proc_macro::TokenStream;
-use proc_macro2::Ident;
+use proc_macro2::Span;
+use prost::Message;
+use prost_types::FileDescriptorSet;
 use quote::quote;
-use syn::{parse_macro_input, ItemMod};
+use syn::{Ident, ItemMod, LitStr};
 
-#[derive(Debug, Clone)]
-enum SmsgCategory {
-    File,
-    Package,
-    Git,
-}
-
-#[derive(Debug)]
-struct SmsgAttribute {
-    category: SmsgCategory,
-    path: String,
-    url: Option<String>,
-}
-
-impl SmsgAttribute {
-    pub fn parse(attr: &str) -> Result<Self, String> {
-        let attr = attr.trim();
-
-        if attr.starts_with('"') {
-            return Ok(SmsgAttribute {
-                category: SmsgCategory::File,
-                path: attr.trim_matches('"').to_string(),
-                url: None,
-            });
-        }
-
-        let parts: Vec<&str> = attr.split(',').collect();
-        let mut category = SmsgCategory::File;
-        let mut path = String::new();
-        let mut url: Option<String> = None;
-
-        for part in parts {
-            let part = part.trim();
-            if part.starts_with("category") {
-                let value = part.split('=').nth(1).map(|s| s.trim()).unwrap_or("");
-                category = match value {
-                    "package" => SmsgCategory::Package,
-                    "file" => SmsgCategory::File,
-                    "git" => SmsgCategory::Git,
-                    _ => {
-                        return Err(format!(
-                            "Invalid category: {}. Expected 'file', 'package', or 'git'",
-                            value
-                        ));
-                    }
-                };
-            } else if part.starts_with("path") {
-                path = part
-                    .split('=')
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('"'))
-                    .unwrap_or("")
-                    .to_string();
-            } else if part.starts_with("url") {
-                url = Some(
-                    part.split('=')
-                        .nth(1)
-                        .map(|s| s.trim().trim_matches('"'))
-                        .unwrap_or("")
-                        .to_string(),
-                );
-            }
-        }
-
-        if path.is_empty() {
-            return Err("path is required".to_string());
-        }
-
-        if matches!(category, SmsgCategory::Git) && url.is_none() {
-            return Err("url is required when category is 'git'".to_string());
-        }
-
-        Ok(SmsgAttribute {
-            category,
-            path,
-            url,
-        })
-    }
-}
-
+/// The `#[smsg("path/to/descriptors.pb")]` attribute macro.
+///
+/// Reads a protoc `FileDescriptorSet` at compile time and generates
+/// `impl soul_msg::EnvelopeMeta` blocks for every message in the package that
+/// matches the annotated module's name.
+///
+/// Usage:
+/// ```ignore
+/// #[smsg("descriptors.pb")]
+/// pub mod chat {
+///     include!(concat!(env!("OUT_DIR"), "/chat.rs"));
+/// }
+/// ```
+///
+/// The path is resolved relative to `CARGO_MANIFEST_DIR`. The module must contain
+/// the prost-generated types for the matching package (e.g. via `include!`).
 #[proc_macro_attribute]
 pub fn smsg(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr_str = attr.to_string();
-
-    let smsg_attr = match SmsgAttribute::parse(&attr_str) {
-        Ok(a) => a,
-        Err(e) => {
-            return TokenStream::from(quote! {
-                compile_error!(#e)
-            });
+    match expand(attr, item) {
+        Ok(ts) => ts.into(),
+        Err(msg) => {
+            let msg = msg.to_string();
+            quote! { compile_error!(#msg) }.into()
         }
-    };
-
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    let full_path = std::path::Path::new(&manifest_dir).join(&smsg_attr.path);
-
-    match smsg_attr.category {
-        SmsgCategory::File => generate_file_type(&full_path, item),
-        SmsgCategory::Package => generate_package_type(&full_path, item),
-        SmsgCategory::Git => generate_git_type(&smsg_attr, item),
     }
 }
 
-fn generate_file_type(full_path: &std::path::Path, item: TokenStream) -> TokenStream {
-    let source_code = match std::fs::read_to_string(full_path) {
-        Ok(content) => content,
-        Err(e) => {
-            let err_msg = format!("Failed to read smsg file '{}': {}", full_path.display(), e);
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
+fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<proc_macro2::TokenStream> {
+    let path_lit: LitStr = syn::parse(attr)?;
+    let item_mod: ItemMod = syn::parse(item)?;
+    let mod_name = item_mod.ident.to_string();
 
-    let smsg_file = match parse_smsg(&source_code) {
-        Ok(file) => file,
-        Err(e) => {
-            let err_msg = e.to_string();
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
-
-    if let Err(err_msg) = validate_smsg_file(&smsg_file) {
-        return TokenStream::from(quote! {
-            compile_error!(#err_msg)
-        });
-    }
-
-    let item_mod = parse_macro_input!(item as ItemMod);
-    let mod_name = Ident::new(&item_mod.ident.to_string(), proc_macro2::Span::call_site());
-
-    let struct_gen = StructGenerator::new();
-    let struct_code = struct_gen.generate(&smsg_file);
-
-    let derive_gen = DeriveGenerator::new();
-    let derive_code = derive_gen.generate(&smsg_file);
-
-    let expanded = quote! {
-        pub mod #mod_name {
-            use super::*;
-
-            #struct_code
-            #derive_code
-        }
-    };
-
-    TokenStream::from(expanded)
-}
-
-fn generate_package_type(full_path: &std::path::Path, item: TokenStream) -> TokenStream {
-    let package_toml_path = full_path.join("package.toml");
-
-    let toml_content = match std::fs::read_to_string(&package_toml_path) {
-        Ok(content) => content,
-        Err(e) => {
-            let err_msg = format!(
-                "Failed to read package.toml '{}': {}",
-                package_toml_path.display(),
-                e
-            );
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
-
-    let _package = match parse_package_toml(&toml_content, &full_path.to_string_lossy()) {
-        Ok(pkg) => pkg,
-        Err(e) => {
-            let err_msg = e.to_string();
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
-
-    let smsg_files = match walk_package_directory(full_path) {
-        Ok(files) => files,
-        Err(e) => {
-            let err_msg = format!(
-                "Failed to read package directory '{}': {}",
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .map_err(|_| syn::Error::new(Span::call_site(), "CARGO_MANIFEST_DIR is not set"))?;
+    let full_path = Path::new(&manifest_dir).join(path_lit.value());
+    let bytes = std::fs::read(&full_path).map_err(|e| {
+        syn::Error::new(
+            Span::call_site(),
+            format!(
+                "failed to read descriptor set '{}': {}",
                 full_path.display(),
                 e
-            );
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
+            ),
+        )
+    })?;
 
-    let module_structure = build_module_structure(full_path, &smsg_files);
+    let set = FileDescriptorSet::decode(bytes.as_slice()).map_err(|e| {
+        syn::Error::new(Span::call_site(), format!("invalid descriptor set: {}", e))
+    })?;
 
-    if let Err(err_msg) = validate_module_structure(&module_structure) {
-        return TokenStream::from(quote! {
-            compile_error!(#err_msg)
-        });
-    }
-
-    let item_mod = parse_macro_input!(item as ItemMod);
-    let mod_name = Ident::new(&item_mod.ident.to_string(), proc_macro2::Span::call_site());
-
-    let module_gen = ModuleGenerator::new();
-    let module_code = module_gen.generate_module_structure(&module_structure);
-
-    let expanded = quote! {
-        pub mod #mod_name {
-            use super::*;
-
-            #module_code
-        }
-    };
-
-    TokenStream::from(expanded)
-}
-
-fn generate_git_type(attr: &SmsgAttribute, item: TokenStream) -> TokenStream {
-    let url = match &attr.url {
-        Some(u) => u.clone(),
-        None => {
-            return TokenStream::from(quote! {
-                compile_error!("url is required when category is 'git'")
-            });
-        }
-    };
-
-    let repo_info = match parse_github_url(&url) {
-        Ok(info) => info,
-        Err(e) => {
-            let err_msg = e.to_string();
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
-
-    let (reference, clean_path) = parse_path_with_ref(&attr.path);
-
-    let package_toml_path = if clean_path.ends_with('/') {
-        format!("{}package.toml", clean_path)
-    } else {
-        format!("{}/package.toml", clean_path)
-    };
-
-    let files = fetch_directory_contents_recursive(
-        &repo_info.owner,
-        &repo_info.repo,
-        clean_path,
-        reference.as_deref(),
-    );
-
-    match files {
-        Ok(files) => {
-            let has_package_toml = files.contains_key(&package_toml_path);
-            if has_package_toml {
-                generate_git_package_type(&files, clean_path, item)
-            } else {
-                let source_code = match fetch_file_content_at_ref(
-                    &repo_info.owner,
-                    &repo_info.repo,
-                    clean_path,
-                    reference.as_deref(),
-                ) {
-                    Ok(content) => content,
-                    Err(e) => {
-                        let err_msg = e.to_string();
-                        return TokenStream::from(quote! {
-                            compile_error!(#err_msg)
-                        });
-                    }
-                };
-
-                let smsg_file = match parse_smsg(&source_code) {
-                    Ok(file) => file,
-                    Err(e) => {
-                        let err_msg = e.to_string();
-                        return TokenStream::from(quote! {
-                            compile_error!(#err_msg)
-                        });
-                    }
-                };
-
-                if let Err(err_msg) = validate_smsg_file(&smsg_file) {
-                    return TokenStream::from(quote! {
-                        compile_error!(#err_msg)
-                    });
-                }
-
-                let item_mod = parse_macro_input!(item as ItemMod);
-                let mod_name =
-                    Ident::new(&item_mod.ident.to_string(), proc_macro2::Span::call_site());
-
-                let struct_gen = StructGenerator::new();
-                let struct_code = struct_gen.generate(&smsg_file);
-
-                let derive_gen = DeriveGenerator::new();
-                let derive_code = derive_gen.generate(&smsg_file);
-
-                let expanded = quote! {
-                    pub mod #mod_name {
-                        use super::*;
-
-                        #struct_code
-                        #derive_code
-                    }
-                };
-
-                TokenStream::from(expanded)
-            }
-        }
-        Err(_) => {
-            let source_code = match fetch_file_content_at_ref(
-                &repo_info.owner,
-                &repo_info.repo,
-                clean_path,
-                reference.as_deref(),
-            ) {
-                Ok(content) => content,
-                Err(e) => {
-                    let err_msg = e.to_string();
-                    return TokenStream::from(quote! {
-                        compile_error!(#err_msg)
-                    });
-                }
-            };
-
-            let smsg_file = match parse_smsg(&source_code) {
-                Ok(file) => file,
-                Err(e) => {
-                    let err_msg = e.to_string();
-                    return TokenStream::from(quote! {
-                        compile_error!(#err_msg)
-                    });
-                }
-            };
-
-            if let Err(err_msg) = validate_smsg_file(&smsg_file) {
-                return TokenStream::from(quote! {
-                    compile_error!(#err_msg)
-                });
-            }
-
-            let item_mod = parse_macro_input!(item as ItemMod);
-            let mod_name = Ident::new(&item_mod.ident.to_string(), proc_macro2::Span::call_site());
-
-            let struct_gen = StructGenerator::new();
-            let struct_code = struct_gen.generate(&smsg_file);
-
-            let derive_gen = DeriveGenerator::new();
-            let derive_code = derive_gen.generate(&smsg_file);
-
-            let expanded = quote! {
-                pub mod #mod_name {
-                    use super::*;
-
-                    #struct_code
-                    #derive_code
-                }
-            };
-
-            TokenStream::from(expanded)
-        }
-    }
-}
-
-fn generate_git_package_type(
-    files: &std::collections::HashMap<String, String>,
-    base_path: &str,
-    item: TokenStream,
-) -> TokenStream {
-    let package_toml_path = if base_path.ends_with('/') {
-        format!("{}package.toml", base_path)
-    } else {
-        format!("{}/package.toml", base_path)
-    };
-
-    let toml_content = match files.get(&package_toml_path) {
-        Some(content) => content.clone(),
-        None => {
-            let err_msg = format!("package.toml not found at {}", package_toml_path);
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
-
-    let _package = match parse_package_toml(&toml_content, base_path) {
-        Ok(pkg) => pkg,
-        Err(e) => {
-            let err_msg = e.to_string();
-            return TokenStream::from(quote! {
-                compile_error!(#err_msg)
-            });
-        }
-    };
-
-    let item_mod = parse_macro_input!(item as ItemMod);
-    let mod_name = Ident::new(&item_mod.ident.to_string(), proc_macro2::Span::call_site());
-
-    let module_structure = build_git_module_structure(files, base_path);
-
-    if let Err(err_msg) = validate_module_structure(&module_structure) {
-        return TokenStream::from(quote! {
-            compile_error!(#err_msg)
-        });
-    }
-
-    let module_gen = ModuleGenerator::new();
-    let module_code = module_gen.generate_module_structure(&module_structure);
-
-    let expanded = quote! {
-        pub mod #mod_name {
-            use super::*;
-
-            #module_code
-        }
-    };
-
-    TokenStream::from(expanded)
-}
-
-fn build_git_module_structure(
-    files: &std::collections::HashMap<String, String>,
-    base_path: &str,
-) -> crate::ir::ModuleStructure {
-    use crate::ir::Module;
-
-    let root_name = base_path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .next_back()
-        .unwrap_or("root")
-        .to_string();
-
-    let mut root_module = Module::new(root_name.clone(), base_path.to_string());
-
-    for (path, content) in files {
-        if path.ends_with("package.toml") {
+    let mut impls: Vec<syn::Item> = Vec::new();
+    for file in &set.file {
+        if file.package() != mod_name {
             continue;
         }
-
-        if !path.ends_with(".smsg") {
-            continue;
-        }
-
-        let relative = path.strip_prefix(base_path).unwrap_or(path);
-        let relative = relative.trim_start_matches('/');
-        let parent = std::path::Path::new(relative).parent();
-
-        if let Ok(smsg_file_parsed) = parse_smsg(content) {
-            match parent {
-                Some(parent_dir) if parent_dir.as_os_str().is_empty() => {
-                    root_module.messages.extend(smsg_file_parsed.messages);
+        for msg in &file.message_type {
+            let short = msg.name();
+            let full_name = smsg_core::full_message_name(&mod_name, short);
+            let name_hash = smsg_core::compute_name_hash(short);
+            let version_hash = smsg_core::compute_message_version_hash(msg, &full_name);
+            let type_ident = Ident::new(&to_rust_type_name(short), Span::call_site());
+            let nh = array_literal(&name_hash);
+            let vh = array_literal(&version_hash);
+            impls.push(syn::parse_quote! {
+                impl soul_msg::EnvelopeMeta for #type_ident {
+                    const NAME_HASH: [u8; 32] = #nh;
+                    const VERSION_HASH: [u8; 32] = #vh;
+                    const FULL_NAME: &'static str = #full_name;
                 }
-                Some(parent_dir) => {
-                    let parts: Vec<&str> = parent_dir.iter().filter_map(|p| p.to_str()).collect();
-                    add_git_to_nested_module(&mut root_module, &parts, &smsg_file_parsed.messages);
-                }
-                None => {
-                    root_module.messages.extend(smsg_file_parsed.messages);
-                }
-            }
+            });
         }
     }
 
-    crate::ir::ModuleStructure { root_module }
+    if impls.is_empty() {
+        return Err(syn::Error::new(
+            Span::call_site(),
+            format!(
+                "no messages found in package '{}' of the descriptor set; \
+                 the module name must match the .proto package",
+                mod_name
+            ),
+        ));
+    }
+
+    let mut item_mod = item_mod;
+    if let Some((_, items)) = item_mod.content.as_mut() {
+        items.extend(impls);
+    }
+
+    Ok(quote!(#item_mod))
 }
 
-fn add_git_to_nested_module(
-    parent: &mut crate::ir::Module,
-    path_parts: &[&str],
-    messages: &[crate::ir::MessageDef],
-) {
-    if path_parts.is_empty() {
-        parent.messages.extend(messages.to_vec());
-        return;
-    }
+fn to_rust_type_name(proto_name: &str) -> String {
+    // prost-build converts message names to UpperCamelCase and sanitizes
+    // identifiers (keywords, leading digits). Mirrors that here.
+    sanitize_identifier(proto_name.to_upper_camel_case())
+}
 
-    let (first, rest) = path_parts.split_first().unwrap();
-
-    if let Some(child) = parent.children.iter_mut().find(|m| m.name == *first) {
-        add_git_to_nested_module(child, rest, messages);
+fn sanitize_identifier(ident: String) -> String {
+    const RUST_KEYWORDS: &[&str] = &[
+        "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate",
+        "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "if", "impl", "in",
+        "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+        "return", "Self", "self", "static", "struct", "super", "trait", "true", "try", "type",
+        "typeof", "unsafe", "unsized", "use", "virtual", "where", "while", "yield", "_",
+    ];
+    if RUST_KEYWORDS.contains(&ident.as_str()) {
+        format!("{}_", ident)
+    } else if ident.starts_with(|c: char| c.is_numeric()) {
+        format!("_{}", ident)
     } else {
-        let child_path = format!("{}/{}", parent.path, first);
-        let mut new_module = crate::ir::Module::new(first.to_string(), child_path);
-        add_git_to_nested_module(&mut new_module, rest, messages);
-        parent.children.push(new_module);
+        ident
     }
+}
+
+fn array_literal(bytes: &[u8; 32]) -> proc_macro2::TokenStream {
+    let parts = bytes
+        .iter()
+        .map(|b| proc_macro2::Literal::u8_unsuffixed(*b));
+    quote!([#(#parts),*])
 }

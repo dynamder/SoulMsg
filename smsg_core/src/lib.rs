@@ -1,15 +1,14 @@
-//! Shared core for SoulMsg: `.smsg` intermediate representation, parser, and
-//! deterministic message hashing.
+//! Shared core for SoulMsg: deterministic message hashing from protobuf
+//! descriptors and the envelope wire framing.
 //!
-//! This crate is intentionally free of proc-macro and network code so that it can
-//! be reused by both the Rust proc-macro code generator (`smsg_macro`) and the
-//! cross-language FFI layer (`smsg_ffi`).
+//! This crate is free of proc-macro, network and zenoh code so it can be shared
+//! by the runtime library (`soul_msg`), the proc-macro (`smsg_macro`) and the
+//! cross-language verification harness.
 
-pub mod error;
+pub mod frame;
 pub mod hash;
-pub mod ir;
-pub mod parser;
 
-pub use error::SmsgParseError;
-pub use ir::SmsgFile;
-pub use parser::parse_smsg;
+pub use frame::{
+    envelope_bytes, peek, read_header, EnvelopeError, EnvelopeHeader, Policy, HEADER_LEN,
+};
+pub use hash::{compute_message_version_hash, compute_name_hash, full_message_name};

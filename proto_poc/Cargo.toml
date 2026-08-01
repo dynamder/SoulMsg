@@ -2,13 +2,13 @@
 name = "proto_poc"
 version = "0.1.0"
 edition = "2024"
-description = "Small-scale prototype: protobuf (prost) as the envelope payload instead of zenoh-ext encoding."
+description = "Cross-language verification for SoulMsg's protobuf payload and hash envelope."
 publish = false
 
 [dependencies]
+soul_msg = { path = ".." }
+smsg_macro = { path = "../smsg_macro" }
 prost = "0.14"
-prost-types = "0.14"
-blake3 = "1.5"
 
 [build-dependencies]
 prost-build = "0.14"

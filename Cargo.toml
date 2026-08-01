@@ -1,13 +1,16 @@
 [package]
 name = "soul_msg"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "SoulMsg: schema-verified protobuf messages with a hash envelope (byte-layer only)."
 
 [dependencies]
 smsg_core = { path = "smsg_core" }
-smsg_macro = { path = "smsg_macro" }
-zenoh-ext = "1.7"
-zenoh = "1.7"
+prost = "0.14"
+prost-types = "0.14"
 
 [workspace]
-members = ["smsg_core", "smsg_ffi", "smsg_macro", "proto_poc"]
+members = ["smsg_core", "smsg_macro", "proto_poc"]
+
+[dev-dependencies]
+serde_json = "1"
