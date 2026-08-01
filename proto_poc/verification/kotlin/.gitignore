@@ -1,0 +1,3 @@
+# Downloaded toolchain jars (Kotlin verification) — not source.
+lib/*.jar
+lib/*.pom

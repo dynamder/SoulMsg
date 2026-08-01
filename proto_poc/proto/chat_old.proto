@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package chat_old;
+
+// Older variant of chat.ChatMessage with an extra field, used to prove that
+// version hashes change when the schema changes while name hashes stay stable.
+message ChatMessage {
+  string sender = 1;
+  string content = 2;
+  int64 timestamp = 3;
+  int32 version = 4;
+}

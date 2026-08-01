@@ -7,15 +7,13 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
+smsg_core = { path = "../smsg_core" }
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 miette = { version = "7", features = ["fancy"] }
 thiserror = "2.0"
-zenoh-ext = "1.7"
-winnow = "0.7"
 toml = "0.8"
-blake3 = "1.5"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

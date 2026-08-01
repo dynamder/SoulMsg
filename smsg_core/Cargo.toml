@@ -1,0 +1,9 @@
+[package]
+name = "smsg_core"
+version = "0.1.0"
+edition = "2024"
+description = "Shared core for SoulMsg: .smsg IR, parser, and message hashing (language-neutral)."
+
+[dependencies]
+blake3 = "1.5"
+winnow = "0.7"

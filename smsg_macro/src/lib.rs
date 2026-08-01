@@ -1,8 +1,8 @@
 mod codegen;
 mod error;
-mod hash;
-mod ir;
 mod parser;
+
+use smsg_core::{hash, ir};
 
 use codegen::struct_gen::{ModuleGenerator, StructGenerator};
 use codegen::validate::{validate_module_structure, validate_smsg_file};

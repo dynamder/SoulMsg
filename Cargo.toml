@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+smsg_core = { path = "smsg_core" }
 smsg_macro = { path = "smsg_macro" }
 zenoh-ext = "1.7"
 zenoh = "1.7"
+
+[workspace]
+members = ["smsg_core", "smsg_ffi", "smsg_macro", "proto_poc"]
