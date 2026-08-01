@@ -1,22 +1,28 @@
 //! Cross-language verification crate for SoulMsg's protobuf payload.
 //!
-//! The envelope/hash logic now lives in `soul_msg`; this crate keeps the shared
-//! `.proto` fixtures, the prost code generation, the golden baseline and the
-//! cross-language verifiers, aliasing the `soul_msg` API for the Rust checks.
+//! The envelope/hash logic lives in `soul_msg`; the message types are generated at
+//! compile time by the `#[smsg]` macro (no protoc, no build script). This crate
+//! keeps the shared `.proto` fixtures, the golden baseline and the cross-language
+//! verifiers.
 
 pub use soul_msg::{
     Envelope as ProtoEnvelope, EnvelopeError, MessageRef, Policy, Schema as ProtoSchema, HEADER_LEN,
 };
 
-pub mod chat {
-    include!(concat!(env!("OUT_DIR"), "/chat.rs"));
-}
-pub mod chat_old {
-    include!(concat!(env!("OUT_DIR"), "/chat_old.rs"));
-}
+use smsg_macro::smsg;
 
-/// Loads the schema compiled into this crate (all `.proto` files in `proto/`).
+#[smsg("proto/chat.proto")]
+pub mod chat {}
+
+#[smsg("proto/chat_old.proto")]
+pub mod chat_old {}
+
+/// Loads the schema from the committed descriptor set used by the cross-language
+/// verifiers (`verification/descriptors.pb`).
 pub fn default_schema() -> ProtoSchema {
-    ProtoSchema::from_descriptor_set(include_bytes!(concat!(env!("OUT_DIR"), "/descriptors.pb")))
-        .expect("built-in descriptor set must be valid")
+    ProtoSchema::from_descriptor_set(include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/verification/descriptors.pb"
+    )))
+    .expect("committed descriptor set must be valid")
 }

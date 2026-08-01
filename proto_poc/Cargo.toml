@@ -10,9 +10,5 @@ soul_msg = { path = ".." }
 smsg_macro = { path = "../smsg_macro" }
 prost = "0.14"
 
-[build-dependencies]
-prost-build = "0.14"
-protoc-bin-vendored = "3"
-
 [dev-dependencies]
 serde_json = "1"

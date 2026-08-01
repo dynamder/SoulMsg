@@ -1,6 +1,6 @@
 [package]
 name = "smsg_macro"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [lib]
@@ -8,8 +8,8 @@ proc-macro = true
 
 [dependencies]
 smsg_core = { path = "../smsg_core" }
+protox = "0.9"
 prost-types = "0.14"
-prost = "0.14"
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
@@ -17,7 +17,4 @@ heck = "0.5"
 
 [dev-dependencies]
 soul_msg = { path = ".." }
-
-[build-dependencies]
-prost-build = "0.14"
-protoc-bin-vendored = "3"
+prost = "0.14"

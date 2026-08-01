@@ -1,16 +1,12 @@
-//! Typed usage of SoulMsg with the `#[smsg]` macro: no runtime schema object needed.
-//!
-//! The macro reads the descriptor set at compile time and generates `EnvelopeMeta`
-//! for every message in the matching package. `prost-build` (see `build.rs`)
-//! generates the message types included below.
+//! Typed usage of SoulMsg with the `#[smsg]` macro: no build script, no protoc,
+//! no `OUT_DIR` — the macro parses the `.proto` at compile time and generates the
+//! message types and their `EnvelopeMeta`.
 
 use smsg_macro::smsg;
 use soul_msg::{Envelope, EnvelopeError, Policy};
 
-#[smsg("verification/descriptors.pb")]
-pub mod chat {
-    include!(concat!(env!("OUT_DIR"), "/chat.rs"));
-}
+#[smsg("proto/chat.proto")]
+pub mod chat {}
 
 fn main() -> Result<(), EnvelopeError> {
     let msg = chat::ChatMessage {

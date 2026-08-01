@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package chat;
+
+message ChatMessage {
+  string sender = 1;
+  string content = 2;
+  int64 timestamp = 3;
+}
+
+message Position {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+message RobotState {
+  string name = 1;
+  Position position = 2;
+  int32 status = 3;
+}

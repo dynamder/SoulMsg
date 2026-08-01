@@ -32,22 +32,19 @@ SoulMsg 在 protobuf payload 之上增加哈希信封：
 [dependencies]
 soul_msg = "0.2"
 prost = "0.14"
-
-[build-dependencies]
-prost-build = "0.14"
 ```
+
+无需 build script、无需 `protoc`、无需 `OUT_DIR`——`#[smsg]` 宏在编译期直接解析 `.proto`。
 
 ## 用法（Rust）
 
 ### 1. 定义消息并生成代码
 
-编写 `.proto`，用 prost-build 编译，并给模块挂上 `#[smsg]` 宏。宏在编译期读取 descriptor set，为匹配包内的每个消息生成 `EnvelopeMeta`：
+编写 `.proto`，给模块挂上 `#[smsg]` 宏。宏在编译期（用纯 Rust 的 `protox` 编译器）解析文件，为每个消息生成 prost 结构体 + `EnvelopeMeta`：
 
 ```rust
-#[smsg("descriptors.pb")] // 由 prost-build / protoc --descriptor_set_out 产出
-pub mod chat {
-    include!(concat!(env!("OUT_DIR"), "/chat.rs"));
-}
+#[smsg("proto/chat.proto")]
+pub mod chat {}
 ```
 
 ### 2. 序列化 / 反序列化
